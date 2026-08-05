@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.coverage
+htmlcov/
+.venv/
+runtime/
+config.json
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+/dashboard.html
+*.log
+examples/*.html
+!examples/synthetic-dashboard.html

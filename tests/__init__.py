@@ -1,0 +1,1 @@
+"""Scout Usage Tracker tests."""

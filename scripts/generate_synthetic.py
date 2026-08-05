@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Generate the committed dashboard from deterministic fictional data."""
+
+from __future__ import annotations
+
+import json
+import argparse
+import sqlite3
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from scout_usage_tracker.import_usage import import_usage
+from scout_usage_tracker.render import render_dashboard
+
+SCHEMA = """
+CREATE TABLE assistant_usage_events (
+ id INTEGER PRIMARY KEY, session_id TEXT, model TEXT,
+ input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER,
+ cache_write_tokens INTEGER, reasoning_tokens INTEGER, total_nano_aiu INTEGER,
+ token_details_json TEXT, created_at TEXT, api_endpoint TEXT
+)
+"""
+
+
+def generate(destination: Path = ROOT / "examples" / "synthetic-dashboard.html") -> Path:
+    with tempfile.TemporaryDirectory(prefix="scout-usage-synthetic-") as temporary:
+        work = Path(temporary)
+        source = work / "fictional-source.sqlite3"
+        history = work / "private-history.sqlite3"
+        config_path = work / "config.json"
+        connection = sqlite3.connect(source)
+        connection.execute(SCHEMA)
+        details_a = json.dumps([{"tokenCount": 1250, "costPerBatch": "400", "batchSize": 1000}])
+        details_b = json.dumps([{"tokenCount": 800, "costPerBatch": "750", "batchSize": 1000}])
+        connection.executemany(
+            "INSERT INTO assistant_usage_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (1, "fictional-session-alpha", "example-small", 1000, 210, 250, 0, 40, 500, details_a, "2026-01-02T10:15:00+00:00", "/fictional"),
+                (2, "fictional-session-beta", "example-large", 640, 145, 160, 0, 75, 600, details_b, "2026-01-05T22:30:00+00:00", "/fictional"),
+            ],
+        )
+        connection.commit()
+        connection.close()
+        config = {
+            "schema_version": 1,
+            "source_database": str(source),
+            "history_database": str(history),
+            "dashboard_path": str(destination),
+            "timezone": "UTC",
+            "privacy": {"include_sessions": True},
+            "usd_per_credit_by_model": {"example-small": "0.04", "example-large": "0.12"},
+            "usd_to_nok": "10.00",
+            "account_comparison": {"total": "123.4", "additional_usage_usd": "12.34", "as_of": "2026-01-06", "scope": "fictional account-wide/manual"},
+            "_generated_at": "2026-01-06T12:00:00+00:00",
+        }
+        config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        config_path.chmod(0o600)
+        result = import_usage(source, history, b"synthetic-secret-material-for-tests-32")
+        if result.status != "ok":
+            raise RuntimeError(result)
+        return render_dashboard(config)
+
+
+def check(destination: Path = ROOT / "examples" / "synthetic-dashboard.html") -> bool:
+    if not destination.is_file():
+        return False
+    with tempfile.TemporaryDirectory(prefix="scout-usage-synthetic-check-") as temporary:
+        candidate = Path(temporary) / "synthetic-dashboard.html"
+        generate(candidate)
+        return candidate.read_bytes() == destination.read_bytes()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true", help="verify committed output without modifying it")
+    args = parser.parse_args(argv)
+    if args.check:
+        if check():
+            print("PASS synthetic dashboard is current")
+            return 0
+        print("FAIL synthetic dashboard differs; run the generator", file=sys.stderr)
+        return 1
+    print(generate())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

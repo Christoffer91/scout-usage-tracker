@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scout Usage Tracker"
+  short_description: "Install and manage private Scout usage tracking"
+  default_prompt: "Use $scout-usage to install, update, or troubleshoot my local Scout Usage Tracker."

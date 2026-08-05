@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+  <title>{{TITLE}}</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#f6f7fb;--card:#fff;--ink:#172033;--muted:#596579;--line:#d6dbe5;--accent:#315bd6}
+    [data-theme=dark]{--bg:#10131a;--card:#191e29;--ink:#eef2ff;--muted:#b5bfd3;--line:#364052;--accent:#8cabff}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}main{max-width:1180px;margin:auto;padding:1rem}header{display:flex;justify-content:space-between;gap:1rem;align-items:start}.muted{color:var(--muted)}button{padding:.55rem .8rem;background:var(--card);color:var(--ink);border:2px solid var(--line);border-radius:.5rem}button:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:.7rem}.card,section{background:var(--card);border:1px solid var(--line);border-radius:.7rem;padding:1rem;margin:1rem 0;min-width:0}.value{font-size:1.3rem;font-weight:700;overflow-wrap:anywhere}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:720px}caption{text-align:left;color:var(--muted);padding:.25rem}th,td{text-align:right;padding:.55rem;border-bottom:1px solid var(--line);overflow-wrap:anywhere}th:first-child,td:first-child{text-align:left}thead th{background:var(--bg)}.notice{border-left:5px solid #ba6b00}footer{color:var(--muted);padding:1rem 0}@media(max-width:600px){header{display:block}button{margin-top:.5rem}}
+  </style>
+</head>
+<body><main>
+  <header><div><h1>{{TITLE}}</h1><p class="muted">Updated {{UPDATE_TIME}} · aggregation timezone {{TIMEZONE}}</p></div><button id="theme" type="button" aria-pressed="false">Toggle theme</button></header>
+  <aside class="card notice"><strong>Private local report.</strong> This HTML contains usage metadata. Do not publish or share it without review. Credit totals are exact from Scout's stored nano-AIU; money values are optional estimates, not bills. Actual billed cost may be zero when credits are included.</aside>
+  <div class="cards" aria-label="Usage summary">
+    <div class="card"><div class="muted">Exact credits</div><div class="value">{{TOTAL_CREDITS}}</div></div>
+    <div class="card"><div class="muted">Calls</div><div class="value">{{CALLS}}</div></div>
+    <div class="card"><div class="muted">Input tokens</div><div class="value">{{INPUT}}</div></div>
+    <div class="card"><div class="muted">Output tokens</div><div class="value">{{OUTPUT}}</div></div>
+    <div class="card"><div class="muted">Cache read</div><div class="value">{{CACHE_READ}}</div></div>
+    <div class="card"><div class="muted">Cache share</div><div class="value">{{CACHE_SHARE}}</div></div>
+    <div class="card"><div class="muted">Estimated total</div><div class="value">{{TOTAL_USD}}<br>{{TOTAL_NOK}}</div></div>
+  </div>
+  {{SECTIONS}}
+  <section><h2>Verification</h2><dl><dt>Overall status</dt><dd><strong>{{VERIFICATION_OVERALL}}</strong></dd><dt>Status counts</dt><dd>{{VERIFICATION}}</dd><dt>First event</dt><dd>{{FIRST_EVENT}}</dd><dt>Last event</dt><dd>{{LAST_EVENT}}</dd></dl><h3>Warnings</h3><ul>{{WARNINGS}}</ul></section>
+  {{COMPARISON}}
+  <footer>No prompts, summaries, raw session IDs, source paths, or source row IDs are stored in this report.</footer>
+</main><script>const b=document.getElementById('theme');b.addEventListener('click',()=>{const d=document.documentElement;const dark=d.dataset.theme!=='dark';d.dataset.theme=dark?'dark':'light';b.setAttribute('aria-pressed',String(dark))});</script></body>
+</html>
