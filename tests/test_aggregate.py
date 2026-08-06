@@ -2,7 +2,6 @@ import unittest
 from decimal import Decimal
 
 from scout_usage_tracker.aggregate import aggregate, drilldown_records
-from scout_usage_tracker.privacy import friendly_session_label
 
 
 def row(at, model="m", nano=10, session="a" * 64):
@@ -53,11 +52,3 @@ class AggregateTests(unittest.TestCase):
         public = drilldown_records(rows, "UTC", include_sessions=False)
         self.assertEqual(len(public), 2)
         self.assertTrue(all("chat" not in item for item in public))
-
-    def test_friendly_chat_names_are_stable_and_hide_the_digest(self):
-        first = friendly_session_label("a" * 12)
-        self.assertEqual(first, friendly_session_label("a" * 12))
-        self.assertNotEqual(first, friendly_session_label("b" * 12))
-        self.assertTrue(first.startswith("Chat "))
-        self.assertNotIn("aaaa", first.lower())
-        self.assertEqual(len(first.split()), 4)

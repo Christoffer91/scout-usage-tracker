@@ -510,7 +510,6 @@
   try { filterData = JSON.parse(dashboard.dataset.filterData || '{}'); } catch (_) {}
   const models = Array.isArray(filterData.models) ? filterData.models : [];
   const drilldownRecords = Array.isArray(filterData.records) ? filterData.records : [];
-  const chatNames = filterData.chat_names && typeof filterData.chat_names === 'object' ? filterData.chat_names : {};
   if (!models.length) return;
 
   const selected = new Set(models.map((model) => model.id));
@@ -534,7 +533,7 @@
   };
   const combined = () => {
     const total = blank();
-    const maps = { day: new Map(), week: new Map(), month: new Map(), session: new Map() };
+    const maps = { day: new Map(), week: new Map(), month: new Map() };
     models.filter((model) => selected.has(model.id)).forEach((model) => {
       add(total, model.total);
       Object.entries(model.groups || {}).forEach(([name, rows]) => {
@@ -650,8 +649,7 @@
     return element;
   };
   const expandedRows = new Set();
-  const recordKey = (group) => group === 'session' ? 'chat' : group;
-  const displayLabel = (key, label) => key === 'chat' ? (chatNames[label] || 'Anonymized chat') : label;
+  const recordKey = (group) => group;
   const groupedDetails = (source, key) => {
     const grouped = new Map();
     source.forEach((record) => {
@@ -669,7 +667,6 @@
     week: [['Days', 'day'], ['Models', 'model'], ['Chats', 'chat']],
     month: [['ISO weeks', 'week'], ['Models', 'model'], ['Chats', 'chat']],
     model: [['Days', 'day'], ['Chats', 'chat']],
-    session: [['Days', 'day'], ['Models', 'model']],
   }[group] || []);
   const makeDrilldownRow = (group, label, columnCount) => {
     const row = document.createElement('tr');
@@ -680,7 +677,7 @@
     grid.className = 'drilldown-grid';
     const key = recordKey(group);
     const source = drilldownRecords.filter((record) => selected.has(record.model) && record[key] === label);
-    const parentLabel = displayLabel(key, label);
+    const parentLabel = label;
     drilldownDefinitions(group).forEach(([title, detailKey]) => {
       const details = groupedDetails(source, detailKey);
       if (!details.length) return;
@@ -702,11 +699,11 @@
       });
       thead.append(header);
       const tbody = document.createElement('tbody');
-      details.forEach((detail) => {
+      details.forEach((detail, index) => {
         const detailRow = document.createElement('tr');
         const name = document.createElement('th');
         name.scope = 'row';
-        name.textContent = displayLabel(detailKey, detail.label);
+        name.textContent = detailKey === 'chat' ? `Chat-${index + 1}` : detail.label;
         detailRow.append(name);
         cell(detailRow, whole.format(credits(detail)), 'numeric');
         cell(detailRow, whole.format(detail.calls), 'numeric');
@@ -747,8 +744,7 @@
         const headingLayout = document.createElement('span');
         headingLayout.className = 'row-heading';
         const headingText = document.createElement('span');
-        const groupKey = recordKey(panel.dataset.breakdownGroup);
-        const visibleLabel = displayLabel(groupKey, item.label);
+        const visibleLabel = item.label;
         headingText.textContent = visibleLabel;
         const rowKey = `${panel.dataset.breakdownGroup}:${item.label}`;
         const expand = document.createElement('button');

@@ -18,7 +18,6 @@ from .config import atomic_write
 from .database import connect_history, secure_history_files
 from .history import active_events, latest_run
 from .pricing import estimate_costs
-from .privacy import friendly_session_label
 
 MODEL_COLORS = ("#008a00", "#7bc87a", "#ba8e6b", "#ec7a2e", "#8a9499", "#33a133")
 
@@ -115,7 +114,7 @@ def _table_panel(
     max_credits = max((abs(row["credits"]) for row in rows), default=Decimal(0))
     body = []
     for row in reversed(rows):
-        display_label = friendly_session_label(row["label"]) if tab_id == "session" else row["label"]
+        display_label = row["label"]
         price = ""
         if prices is not None:
             price = f'<td class="numeric">{_escape(_money(prices.get(row["label"]), "USD"))}</td>'
@@ -160,8 +159,6 @@ def _breakdown(data: dict[str, Any], model_prices: dict[str, Decimal | None]) ->
         ("month", "By month", "By month", data["groups"]["month"], None),
         ("model", "By model", "By model", data["groups"]["model"], model_prices),
     ]
-    if "session" in data["groups"]:
-        definitions.append(("session", "By chats", "By anonymized chat", data["groups"]["session"], None))
     tabs = []
     panels = []
     for index, (tab_id, label, title, rows, prices) in enumerate(definitions):
@@ -358,11 +355,6 @@ def _filter_payload(
             "usd_to_nok": None if usd_to_nok is None else str(usd_to_nok),
         },
     }
-    if include_sessions:
-        payload["chat_names"] = {
-            item["label"]: friendly_session_label(item["label"])
-            for item in data["groups"].get("session", [])
-        }
     return _escape(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
 
 
