@@ -134,7 +134,8 @@ def _table_panel(
     hidden = "" if active else " hidden"
     return (
         f'<div class="tab-panel" id="panel-{tab_id}" role="tabpanel" '
-        f'aria-labelledby="tab-{tab_id}" tabindex="0"{hidden}>'
+        f'aria-labelledby="tab-{tab_id}" tabindex="0" data-breakdown-group="{tab_id}" '
+        f'data-has-prices="{str(prices is not None).lower()}"{hidden}>'
         '<div class="table-wrap"><table>'
         f'<caption>{_escape(title)} usage breakdown</caption><thead><tr>'
         '<th scope="col">Period or group</th><th scope="col" class="numeric">Credits</th>'
@@ -262,17 +263,86 @@ def _model_share(models: list[dict[str, Any]]) -> str:
         label = row["label"]
         center = f"{label} {share:.0f}%"
         legend.append(
-            f'<button type="button" class="model-row" data-center="{_escape(center)}">'
-            f'<i style="--model-color:{color}"></i><span class="model-name">{_escape(label)}</span>'
-            f'<span>{share:.0f}%</span><span>{_escape(_credits(row["credits"]))}</span></button>'
+            f'<button type="button" class="model-row" data-model="{_escape(label)}" '
+            f'data-color="{color}" data-center="{_escape(center)}" aria-pressed="true" '
+            f'aria-label="Include {_escape(label)} in dashboard totals">'
+            f'<i style="--model-color:{color}" aria-hidden="true"></i><span class="model-name">{_escape(label)}</span>'
+            f'<span class="model-share">{share:.0f}%</span>'
+            f'<span class="model-credits">{_escape(_credits(row["credits"]))}</span></button>'
         )
     gradient = "conic-gradient(" + ",".join(stops) + ")" if stops and total else "var(--d-border)"
     return (
-        '<section class="card model-card" data-model-card><h2>Model share</h2><div class="model-layout">'
-        f'<div class="donut" style="--donut:{gradient}" role="img" aria-label="Credit share by model">'
+        '<section class="card model-card" data-model-card><div class="model-heading"><div><h2>Model share</h2>'
+        '<p>Select models to include across usage totals and charts.</p></div>'
+        '<button type="button" class="show-all-models" data-show-all hidden>Show all</button></div>'
+        '<div class="model-layout"><div class="donut-wrap">'
+        f'<div class="donut" data-donut style="--donut:{gradient}" role="img" tabindex="0" '
+        'aria-label="Credit share by model. Move the pointer around the ring for model details.">'
         '<div class="donut-center" aria-live="polite">credits</div></div>'
-        '<div class="model-legend">' + ("".join(legend) or '<p class="empty">No model usage.</p>') + "</div></div></section>"
+        '<div class="chart-tooltip donut-tooltip" role="status" aria-live="polite" hidden></div></div>'
+        '<div class="model-legend"><div class="model-legend-head" aria-hidden="true">'
+        '<span></span><span>Model</span><span>Share (%)</span><span>Credits</span></div>'
+        + ("".join(legend) or '<p class="empty">No model usage.</p>')
+        + '<p class="model-filter-status" data-model-filter-status aria-live="polite"></p></div></div></section>'
     )
+
+
+def _filter_metrics(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "label": item.get("label"),
+        "nano": str(item["nano"]),
+        "calls": item["calls"],
+        "input": item["input"],
+        "output": item["output"],
+        "cache_read": item["cache_read"],
+    }
+
+
+def _filter_payload(
+    rows: list[Any],
+    data: dict[str, Any],
+    config: dict[str, Any],
+    model_prices: dict[str, Decimal | None],
+    billing: dict[str, Any],
+) -> str:
+    include_sessions = bool(config["privacy"]["include_sessions"])
+    model_rows = data["groups"]["model"]
+    models = []
+    for index, model_row in enumerate(model_rows):
+        label = model_row["label"]
+        model_data = aggregate(
+            (row for row in rows if row["model"] == label),
+            config["timezone"],
+            include_sessions,
+        )
+        groups = {
+            name: [_filter_metrics(item) for item in model_data["groups"][name]]
+            for name in ("day", "week", "month", "session")
+            if name in model_data["groups"]
+        }
+        models.append({
+            "id": label,
+            "color": MODEL_COLORS[index % len(MODEL_COLORS)],
+            "total": _filter_metrics(model_data["total"]),
+            "groups": groups,
+            "estimated_usd": None if model_prices.get(label) is None else str(model_prices[label]),
+        })
+    usd_to_nok = config.get("usd_to_nok")
+    money_mode = "none"
+    if models and all(model["estimated_usd"] is not None for model in models):
+        money_mode = "model"
+    elif billing["estimated_gross_scout_usd"] is not None:
+        money_mode = "credit"
+    payload = {
+        "models": models,
+        "window_end": data["groups"]["day"][-1]["label"] if data["groups"]["day"] else None,
+        "money": {
+            "mode": money_mode,
+            "usd_per_credit": "0.01" if money_mode == "credit" else None,
+            "usd_to_nok": None if usd_to_nok is None else str(usd_to_nok),
+        },
+    }
+    return _escape(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
 
 
 def _billing_card(
@@ -440,22 +510,23 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
         if estimates["total_nok"] is not None:
             estimate_note = f'{_escape(_money_total(estimates["total_nok"], "NOK"))} · {estimate_note}'
         money_kpi = (
-            '<div class="hero-kpi"><span>Estimated cost</span>'
-            f'<strong>{_escape(_money_total(estimates["total_usd"], "USD"))}</strong>'
-            f'<small>{estimate_note}</small></div>'
+            '<div class="hero-kpi" data-money-kpi><span>Estimated cost</span>'
+            f'<strong data-money-total>{_escape(_money_total(estimates["total_usd"], "USD"))}</strong>'
+            f'<small data-money-note>{estimate_note}</small></div>'
         )
     elif billing["estimated_gross_scout_usd"] is not None:
         estimate_note = "AI-credit estimate, not a bill"
         if billing["estimated_gross_scout_nok"] is not None:
             estimate_note = f'{_escape(_money_total(billing["estimated_gross_scout_nok"], "NOK"))} · {estimate_note}'
         money_kpi = (
-            '<div class="hero-kpi"><span>Estimated gross Scout value</span>'
-            f'<strong>{_escape(_money_total(billing["estimated_gross_scout_usd"], "USD"))}</strong>'
-            f'<small>{estimate_note}</small></div>'
+            '<div class="hero-kpi" data-money-kpi><span>Estimated gross Scout value</span>'
+            f'<strong data-money-total>{_escape(_money_total(billing["estimated_gross_scout_usd"], "USD"))}</strong>'
+            f'<small data-money-note>{estimate_note}</small></div>'
         )
     delta_text, delta_class, _ = _trend(data["groups"]["day"])
     values = {
         "TITLE": "Scout usage",
+        "FILTER_DATA": _filter_payload(rows, data, config, model_prices, billing),
         "UPDATE_TIME": _escape(_display_datetime(
             generated_source, config["timezone"]
         )),

@@ -116,6 +116,7 @@
     }
     .hero-card { display: flex; align-items: flex-end; gap: 40px; padding: 28px 32px; flex-wrap: wrap; }
     .hero-total { min-width: 190px; }
+    .filter-summary { display: block; margin-top: 7px; color: var(--d-accent); font-size: 12px; font-weight: 650; }
     .eyebrow { color: var(--d-muted-text); font-size: 13px; font-weight: 600; }
     .total-number {
       margin-top: 4px;
@@ -190,8 +191,23 @@
     .bar-fill.latest { box-shadow: inset 0 0 0 2px var(--d-accent); }
     .axis { display: flex; justify-content: space-between; margin-top: 8px; color: var(--d-muted-text); font-size: 11.5px; font-variant-numeric: tabular-nums; }
     .model-card { display: flex; flex-direction: column; }
+    .model-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .model-heading p { margin: 4px 0 0; color: var(--d-muted-text); font-size: 12px; }
+    .show-all-models {
+      flex: none;
+      padding: 5px 9px;
+      border: 1px solid var(--d-border);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--d-accent);
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .show-all-models:hover { border-color: var(--d-accent); }
     .model-layout { display: flex; align-items: center; gap: 24px; margin-top: 20px; flex: 1; }
-    .donut { width: 110px; height: 110px; flex: none; position: relative; border-radius: 50%; background: var(--donut); }
+    .donut-wrap { position: relative; flex: none; }
+    .donut { width: 110px; height: 110px; position: relative; border-radius: 50%; background: var(--donut); cursor: crosshair; }
     .donut-center {
       position: absolute;
       inset: 26px;
@@ -207,11 +223,25 @@
       text-align: center;
       overflow-wrap: anywhere;
     }
+    .donut-tooltip { top: -34px; left: 50%; }
     .model-legend { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; font-variant-numeric: tabular-nums; }
+    .model-legend-head {
+      display: grid;
+      grid-template-columns: 10px minmax(90px, 1fr) minmax(62px, auto) minmax(52px, auto);
+      gap: 8px;
+      padding: 0 6px 3px;
+      color: var(--d-muted-text);
+      font-size: 10.5px;
+      font-weight: 650;
+      text-align: right;
+      text-transform: uppercase;
+      letter-spacing: .02em;
+    }
+    .model-legend-head span:nth-child(2) { text-align: left; }
     .model-row {
       width: 100%;
       display: grid;
-      grid-template-columns: 10px minmax(90px, 1fr) 34px minmax(44px, auto);
+      grid-template-columns: 10px minmax(90px, 1fr) minmax(62px, auto) minmax(52px, auto);
       align-items: center;
       gap: 8px;
       padding: 6px;
@@ -221,11 +251,15 @@
       color: var(--d-text);
       font-size: 13px;
       text-align: right;
-      cursor: default;
+      cursor: pointer;
     }
     .model-row:hover, .model-row:focus-visible { background: var(--d-bg); }
-    .model-row i { width: 10px; height: 10px; border-radius: 3px; background: var(--model-color); }
+    .model-row i { width: 10px; height: 10px; border-radius: 3px; background: var(--model-color); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 5%); }
     .model-name { min-width: 0; color: var(--d-strong); font-weight: 650; text-align: left; overflow-wrap: anywhere; }
+    .model-row[aria-pressed="false"] { opacity: .48; }
+    .model-row[aria-pressed="false"] .model-name { text-decoration: line-through; text-decoration-thickness: 1px; }
+    .model-row[aria-pressed="false"] i { background: transparent; box-shadow: inset 0 0 0 2px var(--model-color); }
+    .model-filter-status { margin: 3px 6px 0; color: var(--d-muted-text); font-size: 11.5px; }
     .breakdown-card { padding: 8px 28px 24px; }
     .tab-list { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--d-border); }
     .tab {
@@ -282,6 +316,7 @@
       .hero-kpi { min-width: 125px; }
       .model-layout { align-items: flex-start; flex-direction: column; }
       .model-legend { width: 100%; }
+      .model-legend-head, .model-row { grid-template-columns: 10px minmax(100px, 1fr) minmax(58px, auto) minmax(50px, auto); }
       .quiet-row { grid-template-columns: minmax(0, 1fr); }
       .chart-meta { align-items: flex-end; flex-direction: column; gap: 2px; }
       .quiet-card dl { grid-template-columns: 1fr; gap: 2px; }
@@ -293,7 +328,7 @@
   </style>
 </head>
 <body>
-<main class="dashboard">
+<main class="dashboard" data-filter-data="{{FILTER_DATA}}">
   <header class="dashboard-header">
     <div class="header-copy">
       <h1>{{TITLE}}</h1>
@@ -309,14 +344,15 @@
   <section class="card hero-card" aria-label="Usage summary">
     <div class="hero-total">
       <div class="eyebrow">Total Scout-only credits</div>
-      <div class="total-number">{{TOTAL_CREDITS}}</div>
-      <div class="delta {{DELTA_CLASS}}">{{DELTA_TEXT}}</div>
+      <div class="total-number" data-total-credits>{{TOTAL_CREDITS}}</div>
+      <div class="delta {{DELTA_CLASS}}" data-delta>{{DELTA_TEXT}}</div>
+      <span class="filter-summary" data-filter-summary hidden></span>
     </div>
     {{SPARKLINE}}
     <div class="hero-kpis">
-      <div class="hero-kpi"><span>Calls</span><strong>{{CALLS}}</strong></div>
-      <div class="hero-kpi"><span>Tokens in / out</span><strong>{{TOKENS}}</strong></div>
-      <div class="hero-kpi"><span>Cache share</span><strong>{{CACHE_SHARE}}</strong></div>
+      <div class="hero-kpi"><span>Calls</span><strong data-total-calls>{{CALLS}}</strong></div>
+      <div class="hero-kpi"><span>Tokens in / out</span><strong data-total-tokens>{{TOKENS}}</strong></div>
+      <div class="hero-kpi"><span>Cache share</span><strong data-total-cache>{{CACHE_SHARE}}</strong></div>
       {{MONEY_KPI}}
     </div>
   </section>
@@ -380,21 +416,22 @@
   }
 
   const spark = document.querySelector('[data-spark]');
+  let sparkSeries = null;
   if (spark) {
     const svg = spark.querySelector('svg');
     const dot = spark.querySelector('.spark-dot');
     const tooltip = spark.querySelector('.spark-tooltip');
-    const series = JSON.parse(spark.dataset.series);
+    sparkSeries = JSON.parse(spark.dataset.series);
     const showSpark = (event) => {
       const rect = svg.getBoundingClientRect();
       const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
-      const index = Math.round((series.points.length - 1) * x / Math.max(1, rect.width));
-      const point = series.points[index];
+      const index = Math.round((sparkSeries.points.length - 1) * x / Math.max(1, rect.width));
+      const point = sparkSeries.points[index];
       if (!point) return;
       dot.setAttribute('cx', point[0]);
       dot.setAttribute('cy', point[1]);
       dot.hidden = false;
-      tooltip.textContent = `${series.labels[index]} · ${series.values[index]} credits`;
+      tooltip.textContent = `${sparkSeries.labels[index]} · ${sparkSeries.values[index]} credits`;
       tooltip.style.left = `${point[0] / 220 * 100}%`;
       tooltip.hidden = false;
     };
@@ -409,24 +446,309 @@
       tooltip.style.left = `${bar.offsetLeft + bar.offsetWidth / 2}px`;
       tooltip.hidden = false;
     };
-    chart.querySelectorAll('.bar-hit').forEach((bar) => {
+    const bindBars = () => chart.querySelectorAll('.bar-hit').forEach((bar) => {
       bar.addEventListener('pointerenter', () => show(bar));
       bar.addEventListener('focus', () => show(bar));
       bar.addEventListener('pointerleave', () => { tooltip.hidden = true; });
       bar.addEventListener('blur', () => { tooltip.hidden = true; });
     });
+    bindBars();
+    chart.bindBars = bindBars;
   });
 
-  document.querySelectorAll('[data-model-card]').forEach((card) => {
-    const center = card.querySelector('.donut-center');
-    card.querySelectorAll('.model-row').forEach((row) => {
-      const show = () => { center.textContent = row.dataset.center; };
-      row.addEventListener('pointerenter', show);
-      row.addEventListener('focus', show);
-      row.addEventListener('pointerleave', () => { center.textContent = 'credits'; });
-      row.addEventListener('blur', () => { center.textContent = 'credits'; });
+  const dashboard = document.querySelector('.dashboard');
+  let filterData = { models: [], money: { mode: 'none' } };
+  try { filterData = JSON.parse(dashboard.dataset.filterData || '{}'); } catch (_) {}
+  const models = Array.isArray(filterData.models) ? filterData.models : [];
+  if (!models.length) return;
+
+  const selected = new Set(models.map((model) => model.id));
+  const whole = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+  const costNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
+  const blank = () => ({ nano: 0, calls: 0, input: 0, output: 0, cache_read: 0 });
+  const add = (target, source) => {
+    target.nano += Number(source.nano || 0);
+    for (const key of ['calls', 'input', 'output', 'cache_read']) target[key] += Number(source[key] || 0);
+  };
+  const credits = (item) => Number(item.nano || 0) / 1e9;
+  const compact = (value) => {
+    for (const [divisor, suffix] of [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) {
+      if (Math.abs(value) >= divisor) return `${(value / divisor).toFixed(1).replace(/\.0$/, '')}${suffix}`;
+    }
+    return String(value);
+  };
+  const friendlyDay = (label) => {
+    const day = new Date(`${label}T00:00:00Z`);
+    return Number.isNaN(day.valueOf()) ? label : `${day.getUTCDate()} ${day.toLocaleString('en', { month: 'short', timeZone: 'UTC' })}`;
+  };
+  const combined = () => {
+    const total = blank();
+    const maps = { day: new Map(), week: new Map(), month: new Map(), session: new Map() };
+    models.filter((model) => selected.has(model.id)).forEach((model) => {
+      add(total, model.total);
+      Object.entries(model.groups || {}).forEach(([name, rows]) => {
+        if (!maps[name]) return;
+        rows.forEach((source) => {
+          if (!maps[name].has(source.label)) maps[name].set(source.label, { ...blank(), label: source.label });
+          add(maps[name].get(source.label), source);
+        });
+      });
+    });
+    const groups = {};
+    Object.entries(maps).forEach(([name, values]) => {
+      groups[name] = Array.from(values.values()).sort((a, b) => a.label.localeCompare(b.label));
+    });
+    groups.model = models.filter((model) => selected.has(model.id)).map((model) => ({
+      ...model.total, label: model.id, estimated_usd: model.estimated_usd,
+    })).sort((a, b) => a.label.localeCompare(b.label));
+    return { total, groups };
+  };
+  const windowRows = (rows, days) => {
+    if (!filterData.window_end) return [];
+    const source = new Map(rows.map((row) => [row.label, row]));
+    const end = new Date(`${filterData.window_end}T00:00:00Z`);
+    const result = [];
+    for (let offset = days - 1; offset >= 0; offset -= 1) {
+      const day = new Date(end);
+      day.setUTCDate(end.getUTCDate() - offset);
+      const label = day.toISOString().slice(0, 10);
+      result.push(source.get(label) || { ...blank(), label });
+    }
+    return result;
+  };
+
+  const updateSpark = (dayRows) => {
+    if (!spark) return;
+    const rows = windowRows(dayRows, 30);
+    const values = rows.map(credits);
+    const low = Math.min(...values), high = Math.max(...values);
+    const points = values.map((value, index) => {
+      const x = values.length === 1 ? 110 : index * 220 / (values.length - 1);
+      const y = Math.abs(high - low) < Number.EPSILON ? 26 : 48 - (value - low) / (high - low) * 44;
+      return [Number(x.toFixed(2)), Number(y.toFixed(2))];
+    });
+    sparkSeries = { labels: rows.map((row) => friendlyDay(row.label)), values: values.map((value) => whole.format(value)), points };
+    spark.querySelector('polyline').setAttribute('points', points.map((point) => point.join(',')).join(' '));
+    spark.querySelector('.spark-dot').hidden = true;
+    spark.querySelector('.spark-tooltip').hidden = true;
+  };
+  const updateTrend = (dayRows) => {
+    const element = document.querySelector('[data-delta]');
+    const rows = windowRows(dayRows, 60);
+    const current = rows.slice(-30).reduce((sum, row) => sum + credits(row), 0);
+    const previous = rows.slice(-60, -30).reduce((sum, row) => sum + credits(row), 0);
+    let text = '— vs previous 30 days', state = 'delta-neutral';
+    if (previous) {
+      const change = (current - previous) / Math.abs(previous) * 100;
+      if (change > 0) { text = `▲ +${change.toFixed(0)}% vs previous 30 days`; state = 'delta-up'; }
+      else if (change < 0) { text = `▼ ${change.toFixed(0)}% vs previous 30 days`; state = 'delta-down'; }
+      else text = '— 0% vs previous 30 days';
+    }
+    element.textContent = text;
+    element.className = `delta ${state}`;
+  };
+  const updateDaily = (dayRows) => {
+    const card = document.querySelector('.daily-card');
+    const chart = card.querySelector('[data-bar-chart]');
+    const rows = windowRows(dayRows, 60);
+    const values = rows.map((row) => Math.max(0, credits(row)));
+    const maximum = Math.max(...values, 1);
+    const detectSpikes = dayRows.filter((row) => credits(row) !== 0).length >= 15;
+    const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+    const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, values.length));
+    const threshold = mean + 1.6 * deviation;
+    const bars = chart.querySelector('.bar-chart');
+    bars.replaceChildren();
+    rows.forEach((row, index) => {
+      const value = values[index];
+      const spike = detectSpikes && deviation > 0 && value > threshold;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'bar-hit';
+      button.dataset.tip = `${friendlyDay(row.label)} · ${whole.format(credits(row))} credits${spike ? ' · unusually high' : ''}`;
+      button.setAttribute('aria-label', button.dataset.tip);
+      const fill = document.createElement('span');
+      fill.className = `bar-fill${value === 0 ? ' empty' : ''}${spike ? ' spike' : ''}${index === rows.length - 1 ? ' latest' : ''}`;
+      fill.style.height = `${value === 0 ? 0 : Math.max(3, value / maximum * 100).toFixed(2)}%`;
+      button.append(fill);
+      bars.append(button);
+    });
+    const meta = card.querySelector('.chart-meta');
+    meta.replaceChildren();
+    if (detectSpikes) {
+      const key = document.createElement('span');
+      key.className = 'spike-key';
+      const marker = document.createElement('i');
+      key.append(marker, 'Unusually high day');
+      meta.append(key);
+    }
+    const range = document.createElement('span');
+    range.textContent = 'Last 60 days';
+    meta.append(range);
+    const axis = card.querySelector('.axis');
+    axis.firstElementChild.textContent = rows.length ? friendlyDay(rows[0].label) : '—';
+    axis.lastElementChild.textContent = rows.length ? friendlyDay(rows.at(-1).label) : '—';
+    chart.bindBars();
+  };
+
+  const cell = (row, text, className = '') => {
+    const element = document.createElement('td');
+    element.className = className;
+    element.textContent = text;
+    row.append(element);
+    return element;
+  };
+  const updateBreakdowns = (groups) => {
+    document.querySelectorAll('[data-breakdown-group]').forEach((panel) => {
+      const rows = groups[panel.dataset.breakdownGroup] || [];
+      const tbody = panel.querySelector('tbody');
+      const withPrices = panel.dataset.hasPrices === 'true';
+      tbody.replaceChildren();
+      if (!rows.length) {
+        const row = document.createElement('tr');
+        const empty = cell(row, 'No usage events.', 'empty');
+        empty.colSpan = withPrices ? 8 : 7;
+        tbody.append(row);
+        return;
+      }
+      const maximum = Math.max(...rows.map((item) => Math.abs(credits(item))), 0);
+      [...rows].reverse().forEach((item) => {
+        const row = document.createElement('tr');
+        const heading = document.createElement('th');
+        heading.scope = 'row';
+        heading.textContent = item.label;
+        row.append(heading);
+        const creditCell = cell(row, '', 'credits-cell numeric');
+        const strong = document.createElement('strong');
+        strong.textContent = whole.format(credits(item));
+        const bar = document.createElement('span');
+        bar.className = 'credit-bar';
+        bar.setAttribute('aria-hidden', 'true');
+        const fill = document.createElement('span');
+        fill.style.width = `${maximum ? Math.abs(credits(item)) / maximum * 100 : 0}%`;
+        bar.append(fill);
+        creditCell.append(strong, bar);
+        cell(row, whole.format(item.calls), 'numeric');
+        cell(row, whole.format(item.input), 'numeric');
+        cell(row, whole.format(item.output), 'numeric');
+        cell(row, whole.format(item.cache_read), 'numeric');
+        const denominator = item.input + item.cache_read;
+        cell(row, denominator ? `${(item.cache_read / denominator * 100).toFixed(1)}%` : '—', 'numeric');
+        if (withPrices) cell(row, item.estimated_usd == null ? '—' : `USD ${costNumber.format(Number(item.estimated_usd))}`, 'numeric');
+        tbody.append(row);
+      });
+    });
+  };
+
+  const modelCard = document.querySelector('[data-model-card]');
+  const donut = modelCard.querySelector('[data-donut]');
+  const donutCenter = modelCard.querySelector('.donut-center');
+  const donutTooltip = modelCard.querySelector('.donut-tooltip');
+  const donutWrap = modelCard.querySelector('.donut-wrap');
+  const filterStatus = modelCard.querySelector('[data-model-filter-status]');
+  const showAll = modelCard.querySelector('[data-show-all]');
+  let segments = [];
+  const resetDonut = () => { donutCenter.textContent = 'credits'; donutTooltip.hidden = true; };
+  const showDetail = (model, share, x = 55, y = -34) => {
+    donutCenter.textContent = `${model.id} ${share.toFixed(0)}%`;
+    donutTooltip.textContent = `${model.id} · ${share.toFixed(0)}% · ${whole.format(credits(model.total))} credits`;
+    donutTooltip.style.left = `${x}px`;
+    donutTooltip.style.top = `${y}px`;
+    donutTooltip.hidden = false;
+  };
+  const updateModels = () => {
+    const included = models.filter((model) => selected.has(model.id));
+    const total = included.reduce((sum, model) => sum + credits(model.total), 0);
+    let cursor = 0;
+    segments = included.map((model) => {
+      const share = total ? credits(model.total) / total * 100 : 0;
+      const segment = { model, share, start: cursor, end: cursor + share };
+      cursor += share;
+      return segment;
+    });
+    const stops = segments.map((segment) => `${segment.model.color} ${segment.start.toFixed(2)}% ${segment.end.toFixed(2)}%`);
+    donut.style.setProperty('--donut', stops.length && total ? `conic-gradient(${stops.join(',')})` : 'var(--d-border)');
+    donut.setAttribute('aria-label', segments.length
+      ? `Included model shares: ${segments.map((segment) => `${segment.model.id} ${segment.share.toFixed(0)} percent`).join(', ')}`
+      : 'No models are included in the usage view');
+    modelCard.querySelectorAll('.model-row').forEach((row) => {
+      const model = models.find((item) => item.id === row.dataset.model);
+      const segment = segments.find((item) => item.model.id === model.id);
+      const active = selected.has(model.id);
+      row.setAttribute('aria-pressed', String(active));
+      row.setAttribute('aria-label', `${active ? 'Exclude' : 'Include'} ${model.id} ${active ? 'from' : 'in'} dashboard totals`);
+      row.querySelector('.model-share').textContent = segment ? `${segment.share.toFixed(0)}%` : '—';
+      row.querySelector('.model-credits').textContent = whole.format(credits(model.total));
+    });
+    filterStatus.textContent = `${selected.size} of ${models.length} models included`;
+    showAll.hidden = selected.size === models.length;
+    resetDonut();
+  };
+  donut.addEventListener('pointermove', (event) => {
+    const rect = donut.getBoundingClientRect();
+    const dx = event.clientX - rect.left - rect.width / 2;
+    const dy = event.clientY - rect.top - rect.height / 2;
+    const distance = Math.hypot(dx, dy);
+    if (distance < rect.width * .23 || distance > rect.width * .55) { resetDonut(); return; }
+    const position = ((Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360) / 3.6;
+    const segment = segments.find((item) => position >= item.start && position < item.end) || segments.at(-1);
+    if (segment) {
+      const wrapRect = donutWrap.getBoundingClientRect();
+      showDetail(segment.model, segment.share, event.clientX - wrapRect.left, event.clientY - wrapRect.top - 34);
+    }
+  });
+  donut.addEventListener('pointerleave', resetDonut);
+  donut.addEventListener('blur', resetDonut);
+  modelCard.querySelectorAll('.model-row').forEach((row) => {
+    const detail = () => {
+      const model = models.find((item) => item.id === row.dataset.model);
+      const segment = segments.find((item) => item.model.id === row.dataset.model);
+      if (segment) showDetail(model, segment.share);
+      else { donutCenter.textContent = `${model.id} hidden`; donutTooltip.hidden = true; }
+    };
+    row.addEventListener('pointerenter', detail);
+    row.addEventListener('focus', detail);
+    row.addEventListener('pointerleave', resetDonut);
+    row.addEventListener('blur', resetDonut);
+    row.addEventListener('click', () => {
+      if (selected.has(row.dataset.model)) selected.delete(row.dataset.model);
+      else selected.add(row.dataset.model);
+      updateAll();
     });
   });
+  showAll.addEventListener('click', () => { models.forEach((model) => selected.add(model.id)); updateAll(); });
+
+  const updateMoney = (total) => {
+    const container = document.querySelector('[data-money-kpi]');
+    if (!container) return;
+    const mode = filterData.money?.mode;
+    let usd = null;
+    if (mode === 'model') usd = models.filter((model) => selected.has(model.id)).reduce((sum, model) => sum + Number(model.estimated_usd || 0), 0);
+    if (mode === 'credit') usd = credits(total) * Number(filterData.money.usd_per_credit || 0);
+    if (usd == null) return;
+    container.querySelector('[data-money-total]').textContent = `USD ${whole.format(usd)}`;
+    const nokRate = filterData.money.usd_to_nok == null ? null : Number(filterData.money.usd_to_nok);
+    const nok = nokRate == null ? '' : `NOK ${whole.format(usd * nokRate)} · `;
+    container.querySelector('[data-money-note]').textContent = `${nok}${mode === 'credit' ? 'AI-credit estimate, not a bill' : 'estimate, not a bill'}`;
+  };
+  function updateAll() {
+    const view = combined();
+    document.querySelector('[data-total-credits]').textContent = whole.format(credits(view.total));
+    document.querySelector('[data-total-calls]').textContent = compact(view.total.calls);
+    document.querySelector('[data-total-tokens]').textContent = `${compact(view.total.input)} / ${compact(view.total.output)}`;
+    const denominator = view.total.input + view.total.cache_read;
+    document.querySelector('[data-total-cache]').textContent = denominator ? `${(view.total.cache_read / denominator * 100).toFixed(1)}%` : '—';
+    const summary = document.querySelector('[data-filter-summary]');
+    summary.hidden = selected.size === models.length;
+    summary.textContent = `Filtered view · ${selected.size} of ${models.length} models`;
+    updateMoney(view.total);
+    updateTrend(view.groups.day);
+    updateSpark(view.groups.day);
+    updateDaily(view.groups.day);
+    updateBreakdowns(view.groups);
+    updateModels();
+  }
+  updateAll();
 })();
 </script>
 </body>

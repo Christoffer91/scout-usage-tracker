@@ -4,6 +4,7 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+.playwright-cli/
 runtime/
 config.json
 *.sqlite3

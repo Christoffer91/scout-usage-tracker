@@ -1,11 +1,13 @@
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from decimal import Decimal
 from io import StringIO
+from html import unescape
 from pathlib import Path
 
 from scout_usage_tracker.config import ConfigError, load_config
@@ -139,6 +141,14 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn('scope="row"', text)
         self.assertIn('data-bar-chart', text)
         self.assertIn('data-model-card', text)
+        self.assertIn('data-donut', text)
+        self.assertIn('data-filter-data=', text)
+        self.assertIn('data-model-filter-status', text)
+        self.assertIn('aria-pressed="true"', text)
+        self.assertIn("Share (%)", text)
+        self.assertIn("Credits", text)
+        self.assertIn("Show all", text)
+        self.assertIn("Filtered view", text)
         self.assertIn("Estimated cost", text)
         self.assertIn("width: 90%", text)
         self.assertIn("minmax(90px, 1fr)", text)
@@ -150,7 +160,33 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertNotIn('<link rel="stylesheet"', text)
         self.assertEqual(text.count('class="bar-hit"'), 60)
         self.assertEqual(text.count('bar-fill empty'), 59)
-        self.assertNotIn("Unusually high day", text)
+        self.assertNotIn("Unusually high day", text.split("<script>", 1)[0])
+
+    def test_model_filter_payload_contains_only_aggregate_usage(self):
+        source = self.root / "filter-source.sqlite3"
+        history = self.root / "filter-history.sqlite3"
+        dashboard = self.root / "filter.html"
+        make_source(source, [
+            event(identifier=1, session="private-one", model="model-a", total=1_000_000_000),
+            event(identifier=2, session="private-two", model="model-b", total=2_000_000_000),
+        ])
+        import_usage(source, history, b"m" * 32)
+        render_dashboard({
+            "history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
+            "privacy": {"include_sessions": True}, "usd_per_credit_by_model": {}, "usd_to_nok": None,
+        })
+        text = dashboard.read_text()
+        match = re.search(r'data-filter-data="([^"]+)"', text)
+        self.assertIsNotNone(match)
+        payload = json.loads(unescape(match.group(1)))
+        self.assertEqual([model["id"] for model in payload["models"]], ["model-a", "model-b"])
+        self.assertEqual([model["total"]["nano"] for model in payload["models"]], ["1000000000", "2000000000"])
+        self.assertEqual(set(payload), {"models", "window_end", "money"})
+        self.assertNotIn("private-one", text)
+        self.assertNotIn("private-two", text)
+        serialized = json.dumps(payload)
+        for forbidden in ("session_id", "session_digest", "event_time_utc", "source", "prompt", "path"):
+            self.assertNotIn(forbidden, serialized)
 
     def test_plan_billing_card_has_source_scope_freshness_and_invoice_labels(self):
         source = self.root / "billing-source.sqlite3"; history = self.root / "billing-history.sqlite3"; dashboard = self.root / "billing.html"
@@ -201,8 +237,8 @@ class ConfigRenderTests(unittest.TestCase):
             "billing": {"enabled": True, "plan": "unknown"}, "_generated_at": "2026-08-06T12:00:00Z",
         })
         text = dashboard.read_text()
-        self.assertIn("Estimated gross Scout value</span><strong>USD 25", text)
-        self.assertIn("<small>AI-credit estimate, not a bill</small>", text)
+        self.assertIn('Estimated gross Scout value</span><strong data-money-total>USD 25', text)
+        self.assertIn('<small data-money-note>AI-credit estimate, not a bill</small>', text)
         self.assertNotIn("— · AI-credit estimate", text)
         self.assertNotIn("Plan &amp; billing estimates", text)
         self.assertNotIn("Plan source", text)

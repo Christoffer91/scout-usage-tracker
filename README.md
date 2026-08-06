@@ -53,6 +53,7 @@ If any requirement fails, diagnose it safely and explain the smallest corrective
 
 - Exact Scout-only credits from Scout's local `total_nano_aiu` ledger.
 - Daily, ISO-weekly, monthly, and per-model breakdowns.
+- Interactive model filtering: hover the donut for model details, or include/exclude models to recalculate every usage summary, chart, and breakdown without changing stored data.
 - Independent verification using `token_details_json`.
 - A private SQLite history with incremental, duplicate-safe imports.
 - A responsive light/dark dashboard with no external assets or network requests.
