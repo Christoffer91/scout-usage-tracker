@@ -8,6 +8,7 @@ import argparse
 import sqlite3
 import sys
 import tempfile
+from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,14 +35,32 @@ def generate(destination: Path = ROOT / "examples" / "synthetic-dashboard.html")
         config_path = work / "config.json"
         connection = sqlite3.connect(source)
         connection.execute(SCHEMA)
-        details_a = json.dumps([{"tokenCount": 1250, "costPerBatch": "400", "batchSize": 1000}])
-        details_b = json.dumps([{"tokenCount": 800, "costPerBatch": "750", "batchSize": 1000}])
+        models = ("example-small", "example-large", "example-reasoning")
+        start = date(2025, 10, 23)
+        events = []
+        for offset in range(75):
+            day = start + timedelta(days=offset)
+            model_index = offset % len(models)
+            base_nano = 1_200_000_000 + model_index * 650_000_000 + (offset % 9) * 110_000_000
+            total_nano = base_nano * (4 if offset in (17, 43, 68) else 1)
+            details = json.dumps([{"tokenCount": 1000, "costPerBatch": str(total_nano), "batchSize": 1000}])
+            events.append((
+                offset + 1,
+                f"fictional-session-{offset % 5}",
+                models[model_index],
+                160_000 + offset * 1_700,
+                34_000 + offset * 430,
+                72_000 + offset * 950,
+                0,
+                9_000 + offset * 120,
+                total_nano,
+                details,
+                f"{day.isoformat()}T{9 + offset % 8:02d}:15:00+00:00",
+                "/fictional",
+            ))
         connection.executemany(
             "INSERT INTO assistant_usage_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [
-                (1, "fictional-session-alpha", "example-small", 1000, 210, 250, 0, 40, 500, details_a, "2026-01-02T10:15:00+00:00", "/fictional"),
-                (2, "fictional-session-beta", "example-large", 640, 145, 160, 0, 75, 600, details_b, "2026-01-05T22:30:00+00:00", "/fictional"),
-            ],
+            events,
         )
         connection.commit()
         connection.close()
@@ -52,7 +71,11 @@ def generate(destination: Path = ROOT / "examples" / "synthetic-dashboard.html")
             "dashboard_path": str(destination),
             "timezone": "UTC",
             "privacy": {"include_sessions": True},
-            "usd_per_credit_by_model": {"example-small": "0.04", "example-large": "0.12"},
+            "usd_per_credit_by_model": {
+                "example-small": "0.04",
+                "example-large": "0.08",
+                "example-reasoning": "0.12",
+            },
             "usd_to_nok": "10.00",
             "account_comparison": {"total": "123.4", "additional_usage_usd": "12.34", "as_of": "2026-01-06", "scope": "fictional account-wide/manual"},
             "_generated_at": "2026-01-06T12:00:00+00:00",

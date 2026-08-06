@@ -1,4 +1,3 @@
 """Private, local Scout usage accounting."""
 
-__version__ = "0.1.0"
-
+__version__ = "0.1.1"

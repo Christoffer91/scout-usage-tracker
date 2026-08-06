@@ -121,6 +121,28 @@ class ConfigRenderTests(unittest.TestCase):
                           "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None})
         self.assertNotIn("By anonymized session", dashboard.read_text())
 
+    def test_redesigned_dashboard_is_self_contained_and_accessible(self):
+        source = self.root / "source.sqlite3"; history = self.root / "history.sqlite3"; dashboard = self.root / "dashboard.html"
+        make_source(source, [event(model="example-model")]); import_usage(source, history, b"u" * 32)
+        render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
+                          "privacy": {"include_sessions": False},
+                          "usd_per_credit_by_model": {"example-model": "0.1"}, "usd_to_nok": "10"})
+        text = dashboard.read_text()
+        self.assertIn("default-src 'none'", text)
+        self.assertIn('id="theme-toggle"', text)
+        self.assertIn('aria-pressed="false"', text)
+        self.assertIn('role="tablist"', text)
+        self.assertIn('role="tab"', text)
+        self.assertIn('role="tabpanel"', text)
+        self.assertIn('scope="col"', text)
+        self.assertIn('scope="row"', text)
+        self.assertIn('data-bar-chart', text)
+        self.assertIn('data-model-card', text)
+        self.assertIn("Estimated cost", text)
+        self.assertNotIn("title=", text)
+        self.assertNotIn('<script src=', text)
+        self.assertNotIn('<link rel="stylesheet"', text)
+
     def test_verification_overall_mismatch_and_incomplete(self):
         for name, details, total, expected in (
             ("mismatch", None, 21, "MISMATCH"),

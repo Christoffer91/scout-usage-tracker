@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from statistics import fmean, pstdev
 from typing import Any
 
 from .aggregate import aggregate
@@ -15,6 +17,8 @@ from .config import atomic_write
 from .database import connect_history, secure_history_files
 from .history import active_events, latest_run
 from .pricing import estimate_costs
+
+MODEL_COLORS = ("#008a00", "#7bc87a", "#ba8e6b", "#ec7a2e", "#8a9499", "#33a133")
 
 
 def _escape(value: Any) -> str:
@@ -30,31 +34,195 @@ def _number(value: int) -> str:
     return f"{value:,}"
 
 
+def _compact(value: int) -> str:
+    absolute = abs(value)
+    for divisor, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if absolute >= divisor:
+            compact = Decimal(value) / Decimal(divisor)
+            text = f"{compact:.1f}".rstrip("0").rstrip(".")
+            return f"{text}{suffix}"
+    return str(value)
+
+
 def _money(value: Decimal | None, currency: str) -> str:
     return "—" if value is None else f"{currency} {_decimal(value, 4)}"
 
 
-def _table(title: str, rows: list[dict[str, Any]], prices: dict[str, Decimal | None] | None = None) -> str:
+def _friendly_day(value: str) -> str:
+    try:
+        instant = datetime.fromisoformat(value)
+        return f"{instant.day} {instant.strftime('%b')}"
+    except ValueError:
+        return value
+
+
+def _table_panel(
+    tab_id: str,
+    title: str,
+    rows: list[dict[str, Any]],
+    *,
+    prices: dict[str, Decimal | None] | None = None,
+    active: bool = False,
+) -> str:
+    max_credits = max((abs(row["credits"]) for row in rows), default=Decimal(0))
     body = []
-    for row in rows:
+    for row in reversed(rows):
         price = ""
         if prices is not None:
-            price = f"<td>{_escape(_money(prices.get(row['label']), 'USD'))}</td>"
+            price = f'<td class="numeric">{_escape(_money(prices.get(row["label"]), "USD"))}</td>'
         share = "—" if row["cache_share"] is None else f"{row['cache_share'] * 100:.1f}%"
+        width = Decimal(0) if not max_credits else abs(row["credits"]) / max_credits * 100
         body.append(
-            "<tr><th scope=\"row\">" + _escape(row["label"]) + "</th>"
-            f"<td>{_escape(_decimal(row['credits']))}</td><td>{_number(row['calls'])}</td>"
-            f"<td>{_number(row['input'])}</td><td>{_number(row['output'])}</td>"
-            f"<td>{_number(row['cache_read'])}</td><td>{_escape(share)}</td>{price}</tr>"
+            '<tr><th scope="row">' + _escape(row["label"]) + "</th>"
+            '<td class="credits-cell numeric"><strong>' + _escape(_decimal(row["credits"])) + "</strong>"
+            f'<span class="credit-bar" aria-hidden="true"><span style="width:{float(width):.2f}%"></span></span></td>'
+            f'<td class="numeric">{_number(row["calls"])}</td>'
+            f'<td class="numeric">{_number(row["input"])}</td>'
+            f'<td class="numeric">{_number(row["output"])}</td>'
+            f'<td class="numeric">{_number(row["cache_read"])}</td>'
+            f'<td class="numeric">{_escape(share)}</td>{price}</tr>'
         )
-    price_head = "<th scope=\"col\">Estimated cost</th>" if prices is not None else ""
+    column_count = 8 if prices is not None else 7
+    price_head = '<th scope="col" class="numeric">Estimated cost</th>' if prices is not None else ""
+    hidden = "" if active else " hidden"
     return (
-        f"<section><h2>{_escape(title)}</h2><div class=\"table-wrap\"><table>"
-        f"<caption>{_escape(title)} usage breakdown</caption><thead><tr>"
-        "<th scope=\"col\">Period or group</th><th scope=\"col\">Exact credits</th>"
-        "<th scope=\"col\">Calls</th><th scope=\"col\">Input</th><th scope=\"col\">Output</th>"
-        f"<th scope=\"col\">Cache read</th><th scope=\"col\">Cache share</th>{price_head}"
-        "</tr></thead><tbody>" + ("".join(body) or "<tr><td colspan=\"8\">No usage events.</td></tr>") + "</tbody></table></div></section>"
+        f'<div class="tab-panel" id="panel-{tab_id}" role="tabpanel" '
+        f'aria-labelledby="tab-{tab_id}" tabindex="0"{hidden}>'
+        '<div class="table-wrap"><table>'
+        f'<caption>{_escape(title)} usage breakdown</caption><thead><tr>'
+        '<th scope="col">Period or group</th><th scope="col" class="numeric">Credits</th>'
+        '<th scope="col" class="numeric">Calls</th><th scope="col" class="numeric">Input</th>'
+        '<th scope="col" class="numeric">Output</th><th scope="col" class="numeric">Cache read</th>'
+        f'<th scope="col" class="numeric">Cache share</th>{price_head}</tr></thead><tbody>'
+        + ("".join(body) or f'<tr><td colspan="{column_count}" class="empty">No usage events.</td></tr>')
+        + "</tbody></table></div></div>"
+    )
+
+
+def _breakdown(data: dict[str, Any], model_prices: dict[str, Decimal | None]) -> str:
+    definitions = [
+        ("day", "By day", "By day", data["groups"]["day"], None),
+        ("week", "By ISO week", "By ISO week", data["groups"]["week"], None),
+        ("month", "By month", "By month", data["groups"]["month"], None),
+        ("model", "By model", "By model", data["groups"]["model"], model_prices),
+    ]
+    if "session" in data["groups"]:
+        definitions.append(("session", "By session", "By anonymized session", data["groups"]["session"], None))
+    tabs = []
+    panels = []
+    for index, (tab_id, label, title, rows, prices) in enumerate(definitions):
+        selected = index == 0
+        tabs.append(
+            f'<button type="button" id="tab-{tab_id}" class="tab" role="tab" '
+            f'aria-selected="{str(selected).lower()}" aria-controls="panel-{tab_id}" '
+            f'tabindex="{0 if selected else -1}">{_escape(label)}</button>'
+        )
+        panels.append(_table_panel(tab_id, title, rows, prices=prices, active=selected))
+    return (
+        '<section class="card breakdown-card"><div class="tab-list" role="tablist" '
+        'aria-label="Usage breakdown">' + "".join(tabs) + '</div><div class="tab-panels">'
+        + "".join(panels) + "</div></section>"
+    )
+
+
+def _trend(daily: list[dict[str, Any]]) -> tuple[str, str, str]:
+    window = daily[-60:]
+    current = sum((row["credits"] for row in window[-30:]), Decimal(0))
+    previous = sum((row["credits"] for row in window[-60:-30]), Decimal(0))
+    if not previous:
+        return "— vs previous 30 days", "delta-neutral", ""
+    delta = (current - previous) / abs(previous) * 100
+    if delta > 0:
+        return f"▲ +{delta:.0f}% vs previous 30 days", "delta-up", "up"
+    if delta < 0:
+        return f"▼ {delta:.0f}% vs previous 30 days", "delta-down", "down"
+    return "— 0% vs previous 30 days", "delta-neutral", ""
+
+
+def _sparkline(daily: list[dict[str, Any]]) -> str:
+    series = daily[-30:]
+    if not series:
+        return '<div class="spark-empty">No 30-day trend yet</div>'
+    values = [float(row["credits"]) for row in series]
+    low, high = min(values), max(values)
+    points = []
+    for index, value in enumerate(values):
+        x = 110.0 if len(values) == 1 else index * 220.0 / (len(values) - 1)
+        y = 26.0 if math.isclose(high, low) else 48.0 - (value - low) / (high - low) * 44.0
+        points.append((round(x, 2), round(y, 2)))
+    payload = {
+        "labels": [_friendly_day(row["label"]) for row in series],
+        "values": [_decimal(row["credits"]) for row in series],
+        "points": points,
+    }
+    polyline = " ".join(f"{x},{y}" for x, y in points)
+    return (
+        '<div class="spark-wrap" data-spark data-series="' + _escape(json.dumps(payload, separators=(",", ":"))) + '">'
+        '<div class="chart-tooltip spark-tooltip" role="status" aria-live="polite" hidden></div>'
+        '<svg class="sparkline" viewBox="0 0 220 52" role="img" aria-label="30-day credit trend">'
+        f'<polyline points="{polyline}"></polyline><circle class="spark-dot" r="4" hidden></circle>'
+        '<rect class="spark-hit" width="220" height="52"></rect></svg>'
+        '<div class="chart-caption">30-day trend</div></div>'
+    )
+
+
+def _daily_chart(daily: list[dict[str, Any]]) -> str:
+    series = daily[-60:]
+    if not series:
+        bars = '<p class="empty">No daily usage events.</p>'
+        start = end = "—"
+    else:
+        positive = [max(0.0, float(row["credits"])) for row in series]
+        maximum = max(positive) or 1.0
+        mean = fmean(positive)
+        deviation = pstdev(positive) if len(positive) > 1 else 0.0
+        threshold = mean + 1.6 * deviation
+        rendered = []
+        for index, (row, value) in enumerate(zip(series, positive)):
+            spike = deviation > 0 and value > threshold
+            latest = index == len(series) - 1
+            height = max(3.0, value / maximum * 100.0)
+            classes = "bar-fill" + (" spike" if spike else "") + (" latest" if latest else "")
+            suffix = " · unusually high" if spike else ""
+            tip = f'{_friendly_day(row["label"])} · {_decimal(row["credits"])} credits{suffix}'
+            rendered.append(
+                f'<button type="button" class="bar-hit" data-tip="{_escape(tip)}" '
+                f'aria-label="{_escape(tip)}"><span class="{classes}" style="height:{height:.2f}%"></span></button>'
+            )
+        bars = "".join(rendered)
+        start, end = _friendly_day(series[0]["label"]), _friendly_day(series[-1]["label"])
+    return (
+        '<section class="card daily-card"><div class="card-heading"><h2>Daily credits</h2>'
+        '<div class="chart-meta"><span class="spike-key"><i></i>Unusually high day</span><span>Last 60 days</span></div></div>'
+        '<div class="bar-area" data-bar-chart><div class="chart-tooltip bar-tooltip" role="status" aria-live="polite" hidden></div>'
+        f'<div class="bar-chart">{bars}</div></div><div class="axis"><span>{_escape(start)}</span><span>{_escape(end)}</span></div></section>'
+    )
+
+
+def _model_share(models: list[dict[str, Any]]) -> str:
+    positive = [max(Decimal(0), row["credits"]) for row in models]
+    total = sum(positive, Decimal(0))
+    stops = []
+    legend = []
+    cursor = Decimal(0)
+    for index, (row, credits) in enumerate(zip(models, positive)):
+        share = Decimal(0) if not total else credits / total * 100
+        color = MODEL_COLORS[index % len(MODEL_COLORS)]
+        start, cursor = cursor, cursor + share
+        stops.append(f"{color} {float(start):.2f}% {float(cursor):.2f}%")
+        label = row["label"]
+        center = f"{label} {share:.0f}%"
+        legend.append(
+            f'<button type="button" class="model-row" data-center="{_escape(center)}">'
+            f'<i style="--model-color:{color}"></i><span class="model-name">{_escape(label)}</span>'
+            f'<span>{share:.0f}%</span><span>{_escape(_decimal(row["credits"]))}</span></button>'
+        )
+    gradient = "conic-gradient(" + ",".join(stops) + ")" if stops and total else "var(--d-border)"
+    return (
+        '<section class="card model-card" data-model-card><h2>Model share</h2><div class="model-layout">'
+        f'<div class="donut" style="--donut:{gradient}" role="img" aria-label="Credit share by model">'
+        '<div class="donut-center" aria-live="polite">credits</div></div>'
+        '<div class="model-legend">' + ("".join(legend) or '<p class="empty">No model usage.</p>') + "</div></div></section>"
     )
 
 
@@ -71,16 +239,9 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
     credits_by_model = {item["label"]: item["credits"] for item in data["groups"]["model"]}
     estimates = estimate_costs(credits_by_model, config.get("usd_per_credit_by_model", {}), config.get("usd_to_nok"))
     model_prices = estimates["per_model_usd"]
-    sections = [
-        _table("By day", data["groups"]["day"]),
-        _table("By ISO week", data["groups"]["week"]),
-        _table("By month", data["groups"]["month"]),
-        _table("By model", data["groups"]["model"], model_prices),
-    ]
-    if config["privacy"]["include_sessions"]:
-        sections.append(_table("By anonymized session", data["groups"].get("session", [])))
     total = data["total"]
     cache_share = "—" if total["cache_share"] is None else f"{total['cache_share'] * 100:.1f}%"
+
     verification_counts = data["verification"]
     incomplete = verification_counts.get("invalid_json", 0) + verification_counts.get("missing_json", 0)
     run_incomplete = run is not None and (run["rows_skipped"] > 0 or bool(run["possible_id_gap"]))
@@ -92,42 +253,74 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
         overall_verification = "PASS"
     else:
         overall_verification = "INCOMPLETE"
-    verification = ", ".join(f"{_escape(key)}: {_number(value)}" for key, value in verification_counts.items()) or "No events"
+    status_class = "pass" if overall_verification == "PASS" else ("failed" if overall_verification == "MISMATCH" else "warning")
+    status_chip = "Verification pass" if status_class == "pass" else ("Verification failed" if status_class == "failed" else "Verification warning")
+    verification_summary = ", ".join(
+        f"{_escape(name)}: {_number(count)}" for name, count in verification_counts.items()
+    ) or "No events"
+
     warnings = [] if run is None else json.loads(run["warnings_json"])
     if run is not None and run["possible_id_gap"]:
         warnings.append("Possible source history gap detected from non-contiguous source row identifiers.")
     warning_html = "".join(f"<li>{_escape(item)}</li>" for item in warnings) or "<li>None reported.</li>"
+    impact_html = ""
+    if overall_verification != "PASS":
+        impact = (
+            "Stored and recalculated AIU differ for one or more events. Exact Scout credits still use stored total_nano_aiu."
+            if overall_verification == "MISMATCH"
+            else "Some events could not be verified or a possible history gap was detected. Totals reflect the locally retained Scout ledger."
+        )
+        impact_html = f'<div class="verification-notice">{_escape(impact)}</div>'
+    verification_html = (
+        '<section class="quiet-card verification-card"><h2>Verification</h2>'
+        f'<div class="verification-status {status_class}"><strong>{overall_verification}</strong></div><dl>'
+        f'<dt>Verified events</dt><dd>{_number(verification_counts.get("verified", 0))} of {_number(len(rows))}</dd>'
+        f'<dt>Status counts</dt><dd>{verification_summary}</dd>'
+        f'<dt>First event</dt><dd>{_escape(data["first_event"] or "—")}</dd>'
+        f'<dt>Last event</dt><dd>{_escape(data["last_event"] or "—")}</dd></dl>{impact_html}'
+        f'<div class="warning-list"><h3>Warnings</h3><ul>{warning_html}</ul></div></section>'
+    )
+
     comparison = config.get("account_comparison") or {}
     comparison_html = ""
     if comparison:
         comparison_html = (
-            "<section><h2>Manual account-wide comparison</h2><dl>"
-            f"<dt>Account-wide Copilot total (manual)</dt><dd>{_escape(comparison.get('total', '—'))}</dd>"
-            f"<dt>Account-wide additional usage in USD (manual)</dt><dd>{_escape(comparison.get('additional_usage_usd', '—'))}</dd>"
-            f"<dt>As of</dt><dd>{_escape(comparison.get('as_of', '—'))}</dd>"
-            f"<dt>Scope</dt><dd>{_escape(comparison.get('scope', 'account-wide/manual'))}</dd>"
-            "</dl><p>These are account-wide manual values, never Scout-only measurements.</p></section>"
+            '<section class="quiet-card comparison-card"><h2>Manual account-wide comparison</h2><dl>'
+            f'<dt>Account-wide Copilot total (manual)</dt><dd>{_escape(comparison.get("total", "—"))}</dd>'
+            f'<dt>Account-wide additional usage in USD (manual)</dt><dd>{_escape(comparison.get("additional_usage_usd", "—"))}</dd>'
+            f'<dt>As of</dt><dd>{_escape(comparison.get("as_of", "—"))}</dd>'
+            f'<dt>Scope</dt><dd>{_escape(comparison.get("scope", "account-wide/manual"))}</dd>'
+            '</dl><p>These are account-wide manual values, never Scout-only measurements.</p></section>'
         )
-    update_time = config.get("_generated_at", datetime.now(timezone.utc).isoformat())
+
+    money_kpi = ""
+    if estimates["total_usd"] is not None:
+        money_kpi = (
+            '<div class="hero-kpi"><span>Estimated cost</span>'
+            f'<strong>{_escape(_money(estimates["total_usd"], "USD"))}</strong>'
+            f'<small>{_escape(_money(estimates["total_nok"], "NOK"))} · estimate, not a bill</small></div>'
+        )
+
+    delta_text, delta_class, _ = _trend(data["groups"]["day"])
     values = {
-        "TITLE": "Scout Usage Tracker",
-        "UPDATE_TIME": _escape(update_time),
+        "TITLE": "Scout usage",
+        "UPDATE_TIME": _escape(config.get("_generated_at", datetime.now(timezone.utc).isoformat())),
         "TIMEZONE": _escape(data["timezone"]),
+        "VERIFICATION_CHIP": status_chip,
+        "VERIFICATION_CLASS": status_class,
         "TOTAL_CREDITS": _escape(_decimal(total["credits"])),
-        "CALLS": _number(total["calls"]),
-        "INPUT": _number(total["input"]),
-        "OUTPUT": _number(total["output"]),
-        "CACHE_READ": _number(total["cache_read"]),
+        "DELTA_TEXT": _escape(delta_text),
+        "DELTA_CLASS": delta_class,
+        "SPARKLINE": _sparkline(data["groups"]["day"]),
+        "CALLS": _compact(total["calls"]),
+        "TOKENS": f'{_compact(total["input"])} / {_compact(total["output"])}',
         "CACHE_SHARE": _escape(cache_share),
-        "TOTAL_USD": _escape(_money(estimates["total_usd"], "USD")),
-        "TOTAL_NOK": _escape(_money(estimates["total_nok"], "NOK")),
-        "FIRST_EVENT": _escape(data["first_event"] or "—"),
-        "LAST_EVENT": _escape(data["last_event"] or "—"),
-        "VERIFICATION": verification,
-        "VERIFICATION_OVERALL": overall_verification,
-        "WARNINGS": warning_html,
-        "SECTIONS": "".join(sections),
-        "COMPARISON": comparison_html,
+        "MONEY_KPI": money_kpi,
+        "DAILY_CHART": _daily_chart(data["groups"]["day"]),
+        "MODEL_SHARE": _model_share(data["groups"]["model"]),
+        "BREAKDOWN": _breakdown(data, model_prices),
+        "VERIFICATION_CARD": verification_html,
+        "COMPARISON_CARD": comparison_html,
     }
     if template_path is None:
         template_path = Path(__file__).resolve().parents[2] / "templates" / "dashboard.html"
