@@ -50,6 +50,8 @@ def _validate_row(row: sqlite3.Row) -> dict[str, Any]:
     values: dict[str, Any] = {}
     for field in TOKEN_FIELDS:
         value = row[field]
+        if field == "reasoning_tokens" and value is None:
+            value = 0
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise ValueError(f"{field} must be a nonnegative integer")
         values[field] = value

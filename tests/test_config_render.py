@@ -11,7 +11,7 @@ from pathlib import Path
 from scout_usage_tracker.config import ConfigError, load_config
 from scout_usage_tracker.cli import command_update
 from scout_usage_tracker.import_usage import import_usage
-from scout_usage_tracker.render import _calendar_window, _credits, _daily_chart, _display_datetime, render_dashboard
+from scout_usage_tracker.render import _calendar_window, _credits, _daily_chart, _display_datetime, _money_total, render_dashboard
 
 from tests.helpers import event, make_source
 
@@ -30,7 +30,7 @@ class ConfigRenderTests(unittest.TestCase):
         path.chmod(0o640)
         config = load_config(path)
         migrated = json.loads(path.read_text())
-        self.assertEqual(migrated["schema_version"], 1)
+        self.assertEqual(migrated["schema_version"], 2)
         self.assertTrue(config["privacy"]["include_sessions"])
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
@@ -112,7 +112,7 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("Account-wide additional usage in USD (manual)", text)
         self.assertIn("&lt;img src=x&gt;", text)
         self.assertIn("never Scout-only", text)
-        self.assertIn("<strong>PASS</strong>", text)
+        self.assertIn("<strong>Verified</strong>", text)
         self.assertEqual(dashboard.stat().st_mode & 0o777, 0o600)
 
     def test_sessions_are_omitted_by_default(self):
@@ -152,6 +152,65 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertEqual(text.count('bar-fill empty'), 59)
         self.assertNotIn("Unusually high day", text)
 
+    def test_plan_billing_card_has_source_scope_freshness_and_invoice_labels(self):
+        source = self.root / "billing-source.sqlite3"; history = self.root / "billing-history.sqlite3"; dashboard = self.root / "billing.html"
+        snapshot = self.root / "billing-snapshot.json"
+        make_source(source, [event(total=2_000_000_000)]); import_usage(source, history, b"b" * 32)
+        snapshot.write_text(json.dumps({
+            "schema_version": 1, "source": "github", "scope": "user",
+            "captured_at": "2026-08-05T10:00:00Z", "year": 2026, "month": 8,
+            "gross_ai_credits": "1700", "discount_credits": "1500",
+            "discount_amount_usd": "15", "net_amount_usd": "2",
+        }), encoding="utf-8")
+        render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
+                          "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": "10",
+                          "billing": {"enabled": True, "plan": "pro", "snapshot_path": str(snapshot)},
+                          "_generated_at": "2026-08-06T12:00:00Z"})
+        text = dashboard.read_text()
+        self.assertIn("Plan &amp; billing estimates", text)
+        self.assertIn("1,500 monthly credits", text)
+        self.assertIn("catalog dated 2026-08-06", text)
+        self.assertIn("Personal user billing scope", text)
+        self.assertIn("Current billing month", text)
+        self.assertIn("Estimated gross Scout value", text)
+        self.assertIn("GitHub-reported usage amount; not a final invoice", text)
+        self.assertIn("200 credits · USD 2 · NOK 20", text)
+        self.assertNotIn("Enable billing and configure billing.plan", text)
+
+    def test_pooled_card_does_not_estimate_user_overage(self):
+        source = self.root / "pool-source.sqlite3"; history = self.root / "pool-history.sqlite3"; dashboard = self.root / "pool.html"
+        make_source(source, [event(total=9_000_000_000_000)]); import_usage(source, history, b"p" * 32)
+        render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
+                          "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None,
+                          "billing": {"enabled": True, "plan": "business"}, "_generated_at": "2026-08-06T12:00:00Z"})
+        text = dashboard.read_text()
+        self.assertIn("1,900 per seat, pooled", text)
+        self.assertIn("USD 19 per user/seat per month", text)
+        self.assertIn("no user overage is estimated", text)
+        self.assertNotIn("Estimated additional usage</dt>", text)
+
+    def test_billing_gross_value_is_hero_fallback_when_model_rate_is_missing(self):
+        source = self.root / "fallback-source.sqlite3"
+        history = self.root / "fallback-history.sqlite3"
+        dashboard = self.root / "fallback.html"
+        make_source(source, [event(total=2_500_000_000_000, model="unpriced-model")])
+        import_usage(source, history, b"f" * 32)
+        render_dashboard({
+            "history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
+            "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None,
+            "billing": {"enabled": True, "plan": "unknown"}, "_generated_at": "2026-08-06T12:00:00Z",
+        })
+        text = dashboard.read_text()
+        self.assertIn("Estimated gross Scout value</span><strong>USD 25", text)
+        self.assertIn("<small>AI-credit estimate, not a bill</small>", text)
+        self.assertNotIn("— · AI-credit estimate", text)
+        self.assertNotIn("Plan &amp; billing estimates", text)
+        self.assertNotIn("Plan source", text)
+        self.assertNotIn("Included allowance", text)
+        self.assertNotIn("Subscription price context", text)
+        self.assertNotIn("Enable billing", text)
+        self.assertNotIn("Estimated additional usage</dt>", text)
+
     def test_sparse_daily_usage_fills_fixed_calendar_window(self):
         daily = [
             {"label": "2025-01-01", "credits": Decimal("1")},
@@ -164,6 +223,8 @@ class ConfigRenderTests(unittest.TestCase):
     def test_displayed_credits_are_whole_numbers(self):
         self.assertEqual(_credits(Decimal("8366.706885")), "8,367")
         self.assertEqual(_credits(Decimal("130.06365")), "130")
+        self.assertEqual(_money_total(Decimal("283.5504"), "USD"), "USD 284")
+        self.assertEqual(_money_total(Decimal("2639.30"), "NOK"), "NOK 2,639")
 
     def test_visible_dates_are_human_readable_and_local(self):
         self.assertEqual(_display_datetime("2026-08-05T12:01:08.565Z", "Europe/Oslo"), "5 Aug 2026, 14:01")
@@ -198,8 +259,9 @@ class ConfigRenderTests(unittest.TestCase):
             render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
                               "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None})
             text = dashboard.read_text()
-            self.assertIn(f"<strong>{expected}</strong>", text)
-            self.assertIn("Status counts", text)
+            self.assertIn("<strong>Review recommended</strong>", text)
+            self.assertNotIn(f"<strong>{expected}</strong>", text)
+            self.assertNotIn("Status counts", text)
 
     def test_skipped_row_makes_render_and_cli_incomplete(self):
         source = self.root / "source.sqlite3"
@@ -216,7 +278,8 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertTrue(output.getvalue().startswith("INCOMPLETE "))
         self.assertIn("skipped=1", output.getvalue())
         self.assertIn("possible_gap=false", output.getvalue())
-        self.assertIn("<strong>INCOMPLETE</strong>", dashboard.read_text())
+        self.assertIn("<strong>Review recommended</strong>", dashboard.read_text())
+        self.assertNotIn("<strong>INCOMPLETE</strong>", dashboard.read_text())
 
     def test_gap_only_makes_render_and_cli_incomplete(self):
         source = self.root / "gap-source.sqlite3"
@@ -232,7 +295,8 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertTrue(output.getvalue().startswith("INCOMPLETE "))
         self.assertIn("skipped=0", output.getvalue())
         self.assertIn("possible_gap=true", output.getvalue())
-        self.assertIn("<strong>INCOMPLETE</strong>", dashboard.read_text())
+        self.assertIn("<strong>Review recommended</strong>", dashboard.read_text())
+        self.assertNotIn("<strong>INCOMPLETE</strong>", dashboard.read_text())
 
     def test_cli_pass_is_reserved_for_fully_verified_events(self):
         for name, total, expected in (("verified", 20, "PASS "), ("mismatch", 21, "INCOMPLETE ")):

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 LEGACY_KEYS = {
     "sourceDatabase": "source_database",
     "historyDatabase": "history_database",
@@ -67,7 +67,7 @@ def _migrate(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             data.pop(presentation_key)
             changed = True
     version = data.get("schema_version", 0)
-    if version not in (0, SCHEMA_VERSION):
+    if version not in (0, 1, SCHEMA_VERSION):
         raise ConfigError(f"unsupported config schema_version: {version}")
     if version != SCHEMA_VERSION:
         data["schema_version"] = SCHEMA_VERSION
@@ -112,10 +112,11 @@ def validate_config(data: dict[str, Any], config_path: Path) -> dict[str, Any]:
     result["usd_per_credit_by_model"] = rates
     if result.get("usd_to_nok") is not None:
         try:
-            if float(result["usd_to_nok"]) < 0:
-                raise ValueError
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("usd_to_nok must be a nonnegative number") from exc
+            exchange = Decimal(str(result["usd_to_nok"]))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ConfigError("usd_to_nok must be a nonnegative finite number") from exc
+        if not exchange.is_finite() or exchange < 0:
+            raise ConfigError("usd_to_nok must be a nonnegative finite number")
     comparison = result.get("account_comparison")
     if comparison is not None and not isinstance(comparison, dict):
         raise ConfigError("account_comparison must be an object")
@@ -138,6 +139,51 @@ def validate_config(data: dict[str, Any], config_path: Path) -> dict[str, Any]:
         if (comparison.get("total") is not None or comparison.get("additional_usage_usd") is not None) and not comparison.get("scope"):
             raise ConfigError("account_comparison.scope is required for manual account-wide values")
         result["account_comparison"] = comparison
+    billing = result.get("billing", {})
+    if not isinstance(billing, dict):
+        raise ConfigError("billing must be an object")
+    allowed_billing = {
+        "enabled", "plan", "included_credits", "monthly_price_usd", "seat_count",
+        "promotional_allowance", "snapshot_path",
+    }
+    unknown_billing = set(billing) - allowed_billing
+    if unknown_billing:
+        raise ConfigError("unknown billing keys: " + ", ".join(sorted(unknown_billing)))
+    if not isinstance(billing.get("enabled", False), bool):
+        raise ConfigError("billing.enabled must be a boolean")
+    from .billing import BillingError, decimal_value, normalize_plan
+    try:
+        plan = normalize_plan(billing.get("plan", "unknown"))
+        clean_billing: dict[str, Any] = {"enabled": billing.get("enabled", False), "plan": plan}
+        for key in ("included_credits", "monthly_price_usd"):
+            if billing.get(key) is not None:
+                decimal_value(billing[key], f"billing.{key}")
+                clean_billing[key] = billing[key]
+        seat_count = billing.get("seat_count")
+        if seat_count is not None:
+            if isinstance(seat_count, bool) or not isinstance(seat_count, int) or seat_count <= 0:
+                raise ConfigError("billing.seat_count must be a positive integer")
+            clean_billing["seat_count"] = seat_count
+        promotional = billing.get("promotional_allowance")
+        if promotional is not None:
+            if not isinstance(promotional, bool):
+                decimal_value(promotional, "billing.promotional_allowance")
+            clean_billing["promotional_allowance"] = promotional
+    except BillingError as exc:
+        raise ConfigError(str(exc)) from exc
+    snapshot_path = billing.get("snapshot_path")
+    if snapshot_path is not None:
+        if not isinstance(snapshot_path, str) or not snapshot_path:
+            raise ConfigError("billing.snapshot_path must be nonempty text")
+        clean_billing["snapshot_path"] = _expand(snapshot_path, base)
+        snapshot_canonical = Path(clean_billing["snapshot_path"]).expanduser().resolve(strict=False)
+        aliases = [label for label, canonical in canonical_paths.items() if canonical == snapshot_canonical]
+        secret_canonical = (Path(result["history_database"]).parent / "hmac-secret").resolve(strict=False)
+        if snapshot_canonical == secret_canonical:
+            aliases.append("hmac-secret")
+        if aliases:
+            raise ConfigError("billing snapshot path must not alias " + ", ".join(aliases))
+    result["billing"] = clean_billing
     return result
 
 

@@ -56,7 +56,7 @@ If any requirement fails, diagnose it safely and explain the smallest corrective
 - Independent verification using `token_details_json`.
 - A private SQLite history with incremental, duplicate-safe imports.
 - A responsive light/dark dashboard with no external assets or network requests.
-- Optional anonymized session reporting, cost estimates, and account-wide comparison — all disabled or empty by default.
+- Optional anonymized session reporting, plan context, billing estimates, and explicit aggregate GitHub billing snapshots — all disabled or empty by default.
 
 <p align="center">
   <img src="docs/images/synthetic-dashboard-mobile.png" width="390" alt="Synthetic Scout Usage Tracker dashboard in a narrow mobile layout">
@@ -103,6 +103,23 @@ credits = Decimal(total_nano_aiu) / 1,000,000,000
 
 **USD and NOK values are estimates, not bills.** The database does not necessarily contain the amount actually charged. Your billed amount may be zero when usage is covered by included credits. Unknown model prices display `—` instead of being guessed.
 
+**Plan and billing context is separate from Scout accounting.** The dated catalog can show Free, Pro, Pro+, Max, Business, Enterprise, custom, or unknown context. Free and unknown allowances are never guessed. Business and Enterprise allowances are pooled at the billing entity and are never allocated to one user. Promotional allowances require an explicit eligibility selection or override.
+
+Official plan context used by the tracker, dated August 2026:
+
+| Plan | Monthly included AI credits | Subscription price context |
+| --- | ---: | ---: |
+| Free | — (not guessed) | USD 0 |
+| Pro | 1,500 | USD 10/month |
+| Pro+ | 7,000 | USD 39/month |
+| Max | 20,000 | USD 100/month |
+| Business | 1,900 per user, pooled | USD 19/user/month |
+| Enterprise | 3,900 per user, pooled | USD 39/user/month |
+
+See GitHub's official [Copilot plans](https://docs.github.com/en/copilot/get-started/plans-for-github-copilot) and [billing usage REST API](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10) documentation. Catalog values are context, not an invoice; explicit overrides are labeled.
+
+**GitHub-reported net usage is still not a final invoice.** An optional snapshot reports the aggregate entity, billing month, capture time, gross AI credits, discounts, and net usage amount returned by GitHub. The dashboard labels its source, scope, and freshness.
+
 ## Privacy by default
 
 Scout's source database is opened using SQLite read-only mode, a bounded busy timeout, and `PRAGMA query_only=ON`.
@@ -133,11 +150,40 @@ The first install creates `~/.config/scout-usage-tracker/config.json` from [conf
 - `privacy.include_sessions`: defaults to `false`; enables only anonymized session labels.
 - `usd_per_credit_by_model`: optional model-specific USD-per-credit estimates.
 - `usd_to_nok`: optional manually supplied exchange rate.
+- `billing.enabled`: enables plan/billing context in the report; it does not enable network access.
+- `billing.plan`: `free`, `pro`, `pro_plus` (or `pro+`), `max`, `business`, `enterprise`, `custom`, or `unknown`.
+- `billing.included_credits` and `billing.monthly_price_usd`: optional explicit overrides, always labeled as custom.
+- `billing.seat_count`: optional positive seat count used only to describe an organization/enterprise pool.
+- `billing.promotional_allowance`: `true` only with confirmed eligibility, or an explicit numeric override. It is never inferred.
+- `billing.snapshot_path`: private aggregate billing snapshot written only by the explicit sync command or supplied manually.
 - `account_comparison`: optional manual account-wide Copilot `total`, `additional_usage_usd`, `as_of`, and `scope`.
 
 Unknown models never receive a guessed cost. A total estimate appears only when every active model has a configured rate. Legacy camelCase keys are migrated safely when needed.
 
 </details>
+
+## Optional explicit GitHub billing sync
+
+Normal `update`, `render`, `status`, `open`, and dashboard viewing make no network requests. A billing read happens only when you explicitly run `github-sync`; it uses the existing authenticated `gh` CLI, a fixed GitHub API endpoint, and a bounded timeout.
+
+Choose the entity that is actually billed. User billing scope excludes organization-managed usage. Organization and enterprise scopes require billing-administration permission for the respective organization or enterprise:
+
+```sh
+${HOME}/.local/bin/scout-usage github-sync --scope user --owner YOUR_LOGIN
+${HOME}/.local/bin/scout-usage github-sync --scope organization --owner YOUR_ORG --year 2026 --month 8
+${HOME}/.local/bin/scout-usage github-sync --scope enterprise --owner YOUR_ENTERPRISE --year 2026 --month 8
+${HOME}/.local/bin/scout-usage render
+```
+
+The GitHub login must already have permission to read billing usage for the selected entity; see GitHub's official [billing API permissions and endpoints](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10). The tracker never reads or stores the token or owner, and it never stores raw responses, usage items, repositories, or model rows. It atomically replaces only the aggregate snapshot at mode `0600`; a missing CLI, denial, timeout, malformed response, or unsupported schema leaves the prior snapshot unchanged. Organization plan detection is best-effort and a detection failure does not discard valid usage.
+
+## Returning-user update prompt
+
+Use this prompt with a local coding agent when updating an existing installation:
+
+```text
+Update my existing Scout Usage Tracker safely from the canonical repository. Preserve my config, history database, billing snapshot, and dashboard path. Review the incoming diff and repository instructions, run the focused tests and privacy checks locally, then use the installer's idempotent update path. Do not print or upload private usage data, enable GitHub billing sync, add plan/currency overrides, install a skill, or enable a background job without my explicit approval. Verify status and one local dashboard refresh, and report exact PASS/FAIL evidence without account totals or private paths.
+```
 
 ## Optional automatic refresh on macOS
 
@@ -225,6 +271,8 @@ Numbers must be finite; token counts and costs must be nonnegative; batch size m
 
 - This is ledger accounting, not a billing API.
 - Currency rates and prices are user-supplied estimates.
+- Dated plan allowances can change and are context only; custom overrides are labeled. Free, custom, and unknown allowances remain unset unless explicitly configured.
+- GitHub billing sync depends on the selected entity and the permissions of the existing `gh` login. Its reported net usage amount is not a final invoice.
 - Source-gap detection is heuristic because raw source row IDs are not retained.
 - Event-level model attribution assigns the whole event to its recorded model.
 - The dashboard refreshes only when the tracker runs; it does not start a local server.

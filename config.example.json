@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source_database": "~/.scout/copilot/session-store.db",
   "history_database": "~/.local/share/scout-usage-tracker/history.sqlite3",
   "dashboard_path": "~/.local/share/scout-usage-tracker/dashboard.html",
@@ -12,5 +12,14 @@
     "example-large": "0.12"
   },
   "usd_to_nok": null,
+  "billing": {
+    "enabled": false,
+    "plan": "unknown",
+    "included_credits": null,
+    "monthly_price_usd": null,
+    "seat_count": null,
+    "promotional_allowance": false,
+    "snapshot_path": "~/.local/share/scout-usage-tracker/billing-snapshot.json"
+  },
   "account_comparison": null
 }

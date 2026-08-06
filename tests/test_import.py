@@ -113,6 +113,18 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertEqual(self.active_rows()[0][11], -20)
 
+    def test_null_reasoning_tokens_is_optional_and_normalized_to_zero(self):
+        make_source(self.source, [event(reasoning=None)])
+        result = import_usage(self.source, self.history, self.secret)
+        self.assertEqual((result.seen, result.inserted, result.rows_skipped), (1, 1, 0))
+        connection = sqlite3.connect(self.history)
+        reasoning, status = connection.execute(
+            "SELECT reasoning_tokens, verification_status FROM usage_versions WHERE active=1"
+        ).fetchone()
+        connection.close()
+        self.assertEqual(reasoning, 0)
+        self.assertEqual(status, "verified")
+
     def test_missing_schema_and_gap_statuses(self):
         self.assertEqual(read_source(self.source).status, "missing")
         connection = sqlite3.connect(self.source)

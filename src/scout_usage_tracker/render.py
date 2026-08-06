@@ -13,6 +13,7 @@ from statistics import fmean, pstdev
 from typing import Any
 
 from .aggregate import aggregate, local_zone
+from .billing import billing_summary
 from .config import atomic_write
 from .database import connect_history, secure_history_files
 from .history import active_events, latest_run
@@ -54,6 +55,10 @@ def _compact(value: int) -> str:
 
 def _money(value: Decimal | None, currency: str) -> str:
     return "—" if value is None else f"{currency} {_decimal(value, 4)}"
+
+
+def _money_total(value: Decimal | None, currency: str) -> str:
+    return "—" if value is None else f"{currency} {value:,.0f}"
 
 
 def _friendly_day(value: str) -> str:
@@ -270,6 +275,104 @@ def _model_share(models: list[dict[str, Any]]) -> str:
     )
 
 
+def _billing_card(
+    config: dict[str, Any],
+    scout_credits: Decimal,
+    generated_at: datetime,
+    summary: dict[str, Any] | None = None,
+) -> str:
+    summary = summary or billing_summary(config, scout_credits, now=generated_at)
+    snapshot = summary["snapshot"]
+    legacy = config.get("account_comparison") or {}
+    if summary["plan"] == "unknown" and not snapshot and not legacy:
+        return ""
+    included = summary["included_credits"]
+    if summary["pooled"]:
+        allowance = "—" if included is None else f"{_credits(included)} per seat, pooled"
+        if summary["effective_allowance"] is not None:
+            allowance += f" · {_credits(summary['effective_allowance'])} configured pool"
+    else:
+        allowance = "—" if included is None else f"{_credits(included)} monthly credits"
+    price = _money(summary["monthly_price_usd"], "USD")
+    if summary["monthly_price_usd"] is not None:
+        price += " per user/seat per month" if summary["pooled"] else " / month"
+    gross_row = f"<dt>Estimated gross Scout value</dt><dd>{_escape(_money_total(summary['estimated_gross_scout_usd'], 'USD'))}"
+    if summary["estimated_gross_scout_nok"] is not None:
+        gross_row += f" · {_escape(_money_total(summary['estimated_gross_scout_nok'], 'NOK'))}"
+    gross_row += " · estimate, not an invoice</dd>"
+    if not summary["enabled"]:
+        rows = []
+        note = "Plan estimates are off. Exact Scout credits remain available above."
+    elif summary["plan"] == "unknown":
+        rows = ["<dt>Plan</dt><dd>Not selected</dd>", gross_row]
+        note = "Select a plan only to add included-credit and overage context; the gross value above does not depend on a plan."
+    else:
+        rows = [
+            f"<dt>Plan</dt><dd>{_escape(summary['label'])}</dd>",
+            f"<dt>Plan source</dt><dd>{_escape(summary['allowance_source'])}</dd>",
+            f"<dt>Included allowance</dt><dd>{_escape(allowance)}</dd>",
+            f"<dt>Subscription price context</dt><dd>{_escape(price)} · {_escape(summary['price_source'])} · context, not an invoice</dd>",
+            gross_row,
+        ]
+        note = "Plan context is an estimate, not an invoice."
+    if snapshot:
+        note = "The billing snapshot matches the configured billing scope and month."
+        source = "GitHub-reported aggregate usage" if snapshot["source"] == "github" else "Manual aggregate snapshot"
+        scope_labels = {
+            "user": "Personal user billing scope",
+            "organization": "Organization billing pool",
+            "enterprise": "Enterprise billing pool",
+        }
+        freshness = "Current billing month" if summary["period_matches"] else "Different billing month; no overage estimate"
+        if not summary["scope_matches"]:
+            freshness += " · scope does not match configured plan"
+            note = "The snapshot scope does not match the configured plan, so no additional-usage estimate is shown."
+        elif not summary["period_matches"]:
+            note = "The snapshot covers a different billing month, so no additional-usage estimate is shown."
+        rows.extend((
+            f"<dt>Billing source</dt><dd>{_escape(source)}</dd>",
+            f"<dt>Scope</dt><dd>{_escape(scope_labels[snapshot['scope']])}</dd>",
+            f"<dt>Period</dt><dd>{snapshot['year']:04d}-{snapshot['month']:02d}</dd>",
+            f"<dt>Captured</dt><dd>{_escape(_display_datetime(snapshot['captured_at'], config['timezone']))}</dd>",
+            f"<dt>Freshness</dt><dd>{_escape(freshness)}</dd>",
+            f"<dt>Gross entity AI credits</dt><dd>{_escape(_credits(snapshot['gross_ai_credits']))}</dd>",
+            f"<dt>Discount credits</dt><dd>{_escape(_credits(snapshot['discount_credits']))}</dd>",
+            f"<dt>Discount amount</dt><dd>{_escape(_money(snapshot['discount_amount_usd'], 'USD'))}</dd>",
+        ))
+        if snapshot.get("plan_type"):
+            rows.append(f"<dt>GitHub-detected organization plan</dt><dd>{_escape(snapshot['plan_type'])} · best-effort context only</dd>")
+        net_label = "GitHub-reported usage amount; not a final invoice" if snapshot["source"] == "github" else "Manual reported amount; not a final invoice"
+        rows.append(f"<dt>Net usage amount</dt><dd>{_escape(_money(snapshot['net_amount_usd'], 'USD'))} · {_escape(net_label)}</dd>")
+        if summary["estimated_additional_credits"] is not None:
+            extra = f"{_credits(summary['estimated_additional_credits'])} credits · {_money(summary['estimated_additional_usd'], 'USD')}"
+            if summary["estimated_additional_nok"] is not None:
+                extra += f" · {_money(summary['estimated_additional_nok'], 'NOK')}"
+            rows.append(f"<dt>Estimated additional usage</dt><dd>{_escape(extra)} · estimate, not an invoice</dd>")
+        elif summary["pooled"]:
+            note = "Business and Enterprise allowances are billing-entity pools; this tracker never allocates a pool share to one user."
+        else:
+            note = "Additional usage needs a matching current-month personal billing snapshot; Scout-only usage is not account-wide usage."
+    elif summary["pooled"]:
+        note = "Business and Enterprise allowances are pooled. Without an aggregate organization or enterprise snapshot, no user overage is estimated."
+    elif summary["plan"] == "free":
+        note = "No Free allowance is assumed. Add an explicit custom allowance only when it is known to apply."
+
+    legacy_html = ""
+    if legacy:
+        legacy_html = (
+            '<div class="warning-list"><h3>Legacy manual comparison</h3><dl>'
+            f'<dt>Account-wide Copilot total (manual)</dt><dd>{_escape(_credits(legacy["total"])) if legacy.get("total") is not None else "—"}</dd>'
+            f'<dt>Account-wide additional usage in USD (manual)</dt><dd>{_escape(legacy.get("additional_usage_usd", "—"))}</dd>'
+            f'<dt>As of</dt><dd>{_escape(_display_datetime(legacy.get("as_of"), config["timezone"]))}</dd>'
+            f'<dt>Scope</dt><dd>{_escape(legacy.get("scope", "manual"))}</dd></dl>'
+            '<p>Compatibility display only; these manual values are never Scout-only measurements.</p></div>'
+        )
+    return (
+        '<section class="quiet-card billing-card"><h2>Plan &amp; billing estimates</h2><dl>'
+        + "".join(rows) + f"</dl><p>{_escape(note)}</p>{legacy_html}</section>"
+    )
+
+
 def render_dashboard(config: dict[str, Any], template_path: str | Path | None = None) -> Path:
     history_path = Path(config["history_database"])
     connection = connect_history(history_path)
@@ -299,14 +402,10 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
         overall_verification = "INCOMPLETE"
     status_class = "pass" if overall_verification == "PASS" else ("failed" if overall_verification == "MISMATCH" else "warning")
     status_chip = "Verification pass" if status_class == "pass" else ("Verification failed" if status_class == "failed" else "Verification warning")
-    verification_summary = ", ".join(
-        f"{_escape(name)}: {_number(count)}" for name, count in verification_counts.items()
-    ) or "No events"
-
     warnings = [] if run is None else json.loads(run["warnings_json"])
     if run is not None and run["possible_id_gap"]:
         warnings.append("Possible source history gap detected from non-contiguous source row identifiers.")
-    warning_html = "".join(f"<li>{_escape(item)}</li>" for item in warnings) or "<li>None reported.</li>"
+    warning_html = "".join(f"<li>{_escape(item)}</li>" for item in warnings)
     impact_html = ""
     if overall_verification != "PASS":
         impact = (
@@ -315,41 +414,50 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
             else "Some events could not be verified or a possible history gap was detected. Totals reflect the locally retained Scout ledger."
         )
         impact_html = f'<div class="verification-notice">{_escape(impact)}</div>'
+    integrity_label = "Verified" if overall_verification == "PASS" else "Review recommended"
+    warnings_block = f'<div class="warning-list"><h3>Details</h3><ul>{warning_html}</ul></div>' if warning_html else ""
     verification_html = (
-        '<section class="quiet-card verification-card"><h2>Verification</h2>'
-        f'<div class="verification-status {status_class}"><strong>{overall_verification}</strong></div><dl>'
-        f'<dt>Verified events</dt><dd>{_number(verification_counts.get("verified", 0))} of {_number(len(rows))}</dd>'
-        f'<dt>Status counts</dt><dd>{verification_summary}</dd>'
+        '<section class="quiet-card verification-card"><h2>Usage integrity</h2><dl>'
+        f'<dt>AIU check</dt><dd class="verification-status {status_class}"><strong>{integrity_label}</strong></dd>'
+        f'<dt>Events checked</dt><dd>{_number(verification_counts.get("verified", 0))} of {_number(len(rows))}</dd>'
         f'<dt>First event</dt><dd>{_escape(_display_datetime(data["first_event"], config["timezone"]))}</dd>'
         f'<dt>Last event</dt><dd>{_escape(_display_datetime(data["last_event"], config["timezone"]))}</dd></dl>{impact_html}'
-        f'<div class="warning-list"><h3>Warnings</h3><ul>{warning_html}</ul></div></section>'
+        f'{warnings_block}</section>'
     )
 
-    comparison = config.get("account_comparison") or {}
-    comparison_html = ""
-    if comparison:
-        comparison_html = (
-            '<section class="quiet-card comparison-card"><h2>Manual account-wide comparison</h2><dl>'
-            f'<dt>Account-wide Copilot total (manual)</dt><dd>{_escape(_credits(comparison["total"])) if comparison.get("total") is not None else "—"}</dd>'
-            f'<dt>Account-wide additional usage in USD (manual)</dt><dd>{_escape(comparison.get("additional_usage_usd", "—"))}</dd>'
-            f'<dt>As of</dt><dd>{_escape(_display_datetime(comparison.get("as_of"), config["timezone"]))}</dd>'
-            f'<dt>Scope</dt><dd>{_escape(comparison.get("scope", "account-wide/manual"))}</dd>'
-            '</dl><p>These are account-wide manual values, never Scout-only measurements.</p></section>'
-        )
+    generated_source = config.get("_generated_at", datetime.now(timezone.utc).isoformat())
+    try:
+        generated_at = datetime.fromisoformat(str(generated_source).replace("Z", "+00:00"))
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=timezone.utc)
+    except ValueError:
+        generated_at = datetime.now(timezone.utc)
+    billing = billing_summary(config, total["credits"], now=generated_at)
 
     money_kpi = ""
     if estimates["total_usd"] is not None:
+        estimate_note = "estimate, not a bill"
+        if estimates["total_nok"] is not None:
+            estimate_note = f'{_escape(_money_total(estimates["total_nok"], "NOK"))} · {estimate_note}'
         money_kpi = (
             '<div class="hero-kpi"><span>Estimated cost</span>'
-            f'<strong>{_escape(_money(estimates["total_usd"], "USD"))}</strong>'
-            f'<small>{_escape(_money(estimates["total_nok"], "NOK"))} · estimate, not a bill</small></div>'
+            f'<strong>{_escape(_money_total(estimates["total_usd"], "USD"))}</strong>'
+            f'<small>{estimate_note}</small></div>'
         )
-
+    elif billing["estimated_gross_scout_usd"] is not None:
+        estimate_note = "AI-credit estimate, not a bill"
+        if billing["estimated_gross_scout_nok"] is not None:
+            estimate_note = f'{_escape(_money_total(billing["estimated_gross_scout_nok"], "NOK"))} · {estimate_note}'
+        money_kpi = (
+            '<div class="hero-kpi"><span>Estimated gross Scout value</span>'
+            f'<strong>{_escape(_money_total(billing["estimated_gross_scout_usd"], "USD"))}</strong>'
+            f'<small>{estimate_note}</small></div>'
+        )
     delta_text, delta_class, _ = _trend(data["groups"]["day"])
     values = {
         "TITLE": "Scout usage",
         "UPDATE_TIME": _escape(_display_datetime(
-            config.get("_generated_at", datetime.now(timezone.utc).isoformat()), config["timezone"]
+            generated_source, config["timezone"]
         )),
         "TIMEZONE": _escape(data["timezone"]),
         "VERIFICATION_CHIP": status_chip,
@@ -366,7 +474,7 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
         "MODEL_SHARE": _model_share(data["groups"]["model"]),
         "BREAKDOWN": _breakdown(data, model_prices),
         "VERIFICATION_CARD": verification_html,
-        "COMPARISON_CARD": comparison_html,
+        "BILLING_CARD": _billing_card(config, total["credits"], generated_at, billing),
     }
     if template_path is None:
         template_path = Path(__file__).resolve().parents[2] / "templates" / "dashboard.html"

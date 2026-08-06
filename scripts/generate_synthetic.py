@@ -32,6 +32,7 @@ def generate(destination: Path = ROOT / "examples" / "synthetic-dashboard.html")
         work = Path(temporary)
         source = work / "fictional-source.sqlite3"
         history = work / "private-history.sqlite3"
+        billing_snapshot = work / "fictional-billing-snapshot.json"
         config_path = work / "config.json"
         connection = sqlite3.connect(source)
         connection.execute(SCHEMA)
@@ -65,7 +66,7 @@ def generate(destination: Path = ROOT / "examples" / "synthetic-dashboard.html")
         connection.commit()
         connection.close()
         config = {
-            "schema_version": 1,
+            "schema_version": 2,
             "source_database": str(source),
             "history_database": str(history),
             "dashboard_path": str(destination),
@@ -77,9 +78,22 @@ def generate(destination: Path = ROOT / "examples" / "synthetic-dashboard.html")
                 "example-reasoning": "0.12",
             },
             "usd_to_nok": "10.00",
-            "account_comparison": {"total": "123.4", "additional_usage_usd": "12.34", "as_of": "2026-01-06", "scope": "fictional account-wide/manual"},
+            "billing": {"enabled": True, "plan": "pro", "snapshot_path": str(billing_snapshot)},
             "_generated_at": "2026-01-06T12:00:00+00:00",
         }
+        billing_snapshot.write_text(json.dumps({
+            "schema_version": 1,
+            "source": "manual",
+            "scope": "user",
+            "captured_at": "2026-01-06T11:30:00Z",
+            "year": 2026,
+            "month": 1,
+            "gross_ai_credits": "2400",
+            "discount_credits": "1500",
+            "discount_amount_usd": "15.00",
+            "net_amount_usd": "9.00",
+        }, indent=2), encoding="utf-8")
+        billing_snapshot.chmod(0o600)
         config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         config_path.chmod(0o600)
         result = import_usage(source, history, b"synthetic-secret-material-for-tests-32")

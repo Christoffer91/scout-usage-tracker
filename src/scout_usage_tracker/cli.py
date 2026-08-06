@@ -8,6 +8,7 @@ import os
 import platform
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import ConfigError, ensure_secret, load_config
@@ -74,10 +75,38 @@ def command_open(config: dict) -> int:
     return 0
 
 
+def command_github_sync(config: dict, scope: str, owner: str, year: int, month: int) -> int:
+    snapshot_path = (config.get("billing") or {}).get("snapshot_path")
+    if not snapshot_path:
+        print("FAIL: billing.snapshot_path must be configured before github-sync", file=sys.stderr)
+        return 2
+    from .github_billing import GitHubBillingError, sync_snapshot
+    try:
+        snapshot = sync_snapshot(snapshot_path, scope, owner, year, month)
+    except GitHubBillingError as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 2
+    print(
+        f"PASS GitHub billing snapshot source=github scope={snapshot['scope']} "
+        f"period={snapshot['year']:04d}-{snapshot['month']:02d}"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scout-usage")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="JSON configuration path")
-    parser.add_argument("command", choices=("update", "refresh", "render", "status", "open"))
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("update", "refresh", "render", "status", "open"):
+        command = commands.add_parser(name)
+        command.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
+    current = datetime.now(timezone.utc)
+    sync = commands.add_parser("github-sync", help="explicitly fetch aggregate GitHub billing usage through gh")
+    sync.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
+    sync.add_argument("--scope", required=True, choices=("user", "organization", "enterprise"))
+    sync.add_argument("--owner", required=True, help="GitHub login, organization, or enterprise slug; never persisted")
+    sync.add_argument("--year", type=int, default=current.year)
+    sync.add_argument("--month", type=int, default=current.month)
     return parser
 
 
@@ -91,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
             return command_render(config)
         if args.command == "status":
             return command_status(config)
+        if args.command == "github-sync":
+            return command_github_sync(config, args.scope, args.owner, args.year, args.month)
         return command_open(config)
     except (ConfigError, ValueError, OSError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
