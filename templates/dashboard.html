@@ -53,7 +53,7 @@
       -webkit-font-smoothing: antialiased;
     }
     button { font: inherit; }
-    button:focus-visible, [role="tabpanel"]:focus-visible {
+    button:focus-visible, [role="tabpanel"]:focus-visible, .donut:focus-visible {
       outline: 3px solid var(--d-accent);
       outline-offset: 3px;
     }
@@ -207,7 +207,26 @@
     .show-all-models:hover { border-color: var(--d-accent); }
     .model-layout { display: flex; align-items: center; gap: 24px; margin-top: 20px; flex: 1; }
     .donut-wrap { position: relative; flex: none; }
-    .donut { width: 110px; height: 110px; position: relative; border-radius: 50%; background: var(--donut); cursor: crosshair; }
+    .donut {
+      --tilt-x: 0deg;
+      --tilt-y: 0deg;
+      width: 110px;
+      height: 110px;
+      position: relative;
+      border-radius: 50%;
+      background: var(--donut);
+      cursor: crosshair;
+      transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(0) scale(1);
+      transform-style: preserve-3d;
+      transform-origin: center;
+      transition: transform 150ms ease, filter 150ms ease, box-shadow 150ms ease;
+      will-change: transform;
+    }
+    .donut.is-hovered {
+      transform: perspective(520px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) translateZ(12px) scale(1.055);
+      box-shadow: 0 14px 24px rgb(33 34 36 / 18%), 0 5px 10px rgb(33 34 36 / 12%);
+      filter: saturate(1.05);
+    }
     .donut-center {
       position: absolute;
       inset: 26px;
@@ -324,6 +343,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+      .donut.is-hovered { transform: none; filter: none; box-shadow: none; }
     }
   </style>
 </head>
@@ -649,6 +669,11 @@
   const showAll = modelCard.querySelector('[data-show-all]');
   let segments = [];
   const resetDonut = () => { donutCenter.textContent = 'credits'; donutTooltip.hidden = true; };
+  const resetDonutLift = () => {
+    donut.classList.remove('is-hovered');
+    donut.style.removeProperty('--tilt-x');
+    donut.style.removeProperty('--tilt-y');
+  };
   const showDetail = (model, share, x = 55, y = -34) => {
     donutCenter.textContent = `${model.id} ${share.toFixed(0)}%`;
     donutTooltip.textContent = `${model.id} · ${share.toFixed(0)}% · ${whole.format(credits(model.total))} credits`;
@@ -689,7 +714,12 @@
     const dx = event.clientX - rect.left - rect.width / 2;
     const dy = event.clientY - rect.top - rect.height / 2;
     const distance = Math.hypot(dx, dy);
-    if (distance < rect.width * .23 || distance > rect.width * .55) { resetDonut(); return; }
+    if (distance < rect.width * .23 || distance > rect.width * .55) { resetDonut(); resetDonutLift(); return; }
+    const normalizedX = Math.max(-1, Math.min(1, dx / (rect.width / 2)));
+    const normalizedY = Math.max(-1, Math.min(1, dy / (rect.height / 2)));
+    donut.classList.add('is-hovered');
+    donut.style.setProperty('--tilt-x', `${(-normalizedY * 7).toFixed(2)}deg`);
+    donut.style.setProperty('--tilt-y', `${(normalizedX * 7).toFixed(2)}deg`);
     const position = ((Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360) / 3.6;
     const segment = segments.find((item) => position >= item.start && position < item.end) || segments.at(-1);
     if (segment) {
@@ -697,8 +727,9 @@
       showDetail(segment.model, segment.share, event.clientX - wrapRect.left, event.clientY - wrapRect.top - 34);
     }
   });
-  donut.addEventListener('pointerleave', resetDonut);
-  donut.addEventListener('blur', resetDonut);
+  donut.addEventListener('pointerleave', () => { resetDonut(); resetDonutLift(); });
+  donut.addEventListener('focus', () => donut.classList.add('is-hovered'));
+  donut.addEventListener('blur', () => { resetDonut(); resetDonutLift(); });
   modelCard.querySelectorAll('.model-row').forEach((row) => {
     const detail = () => {
       const model = models.find((item) => item.id === row.dataset.model);
