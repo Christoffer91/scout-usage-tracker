@@ -302,20 +302,26 @@
     thead th { color: var(--d-muted-text); font-size: 12px; font-weight: 600; text-align: left; }
     tbody th { max-width: 240px; color: var(--d-strong); font-weight: 600; text-align: left; overflow-wrap: anywhere; }
     .row-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .expandable-row { cursor: pointer; }
+    .expandable-row > th, .expandable-row > td { transition: background-color 120ms ease; }
+    .expandable-row:hover > th, .expandable-row:hover > td,
+    .expandable-row:focus-within > th, .expandable-row:focus-within > td { background: color-mix(in srgb, var(--d-accent) 4%, var(--d-card)); }
     .expand-row {
       flex: none;
-      padding: 4px 7px;
-      border: 1px solid var(--d-border);
-      border-radius: 5px;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
       background: transparent;
       color: var(--d-accent);
-      font-size: 11px;
-      font-weight: 650;
+      font-size: 24px;
+      line-height: 1;
       cursor: pointer;
     }
-    .expand-row:hover { border-color: var(--d-accent); background: var(--d-bg); }
-    .expand-row::before { content: "+ "; }
-    .expand-row[aria-expanded="true"]::before { content: "− "; }
+    .expand-row:hover { background: var(--d-bg); }
+    .expand-row span { display: inline-block; transform: translateY(-1px); transition: transform 140ms ease; }
+    .expand-row[aria-expanded="true"] span { transform: rotate(90deg) translateX(-1px); }
     .drilldown-row > td { padding: 14px 16px 18px; background: color-mix(in srgb, var(--d-accent) 3%, var(--d-card)); }
     .drilldown-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
     .drilldown-section { min-width: 0; padding: 12px; border: 1px solid var(--d-border); border-radius: 8px; background: var(--d-card); }
@@ -393,7 +399,7 @@
     </div>
     {{SPARKLINE}}
     <div class="hero-kpis">
-      <div class="hero-kpi"><span>Calls</span><strong data-total-calls>{{CALLS}}</strong></div>
+      <div class="hero-kpi"><span>Tool calls</span><strong data-total-calls>{{CALLS}}</strong></div>
       <div class="hero-kpi"><span>Tokens in / out</span><strong data-total-tokens>{{TOKENS}}</strong></div>
       <div class="hero-kpi"><span>Cache share</span><strong data-total-cache>{{CACHE_SHARE}}</strong></div>
       {{MONEY_KPI}}
@@ -504,6 +510,7 @@
   try { filterData = JSON.parse(dashboard.dataset.filterData || '{}'); } catch (_) {}
   const models = Array.isArray(filterData.models) ? filterData.models : [];
   const drilldownRecords = Array.isArray(filterData.records) ? filterData.records : [];
+  const chatNames = filterData.chat_names && typeof filterData.chat_names === 'object' ? filterData.chat_names : {};
   if (!models.length) return;
 
   const selected = new Set(models.map((model) => model.id));
@@ -644,6 +651,7 @@
   };
   const expandedRows = new Set();
   const recordKey = (group) => group === 'session' ? 'chat' : group;
+  const displayLabel = (key, label) => key === 'chat' ? (chatNames[label] || 'Anonymized chat') : label;
   const groupedDetails = (source, key) => {
     const grouped = new Map();
     source.forEach((record) => {
@@ -672,6 +680,7 @@
     grid.className = 'drilldown-grid';
     const key = recordKey(group);
     const source = drilldownRecords.filter((record) => selected.has(record.model) && record[key] === label);
+    const parentLabel = displayLabel(key, label);
     drilldownDefinitions(group).forEach(([title, detailKey]) => {
       const details = groupedDetails(source, detailKey);
       if (!details.length) return;
@@ -681,10 +690,10 @@
       heading.textContent = title;
       const table = document.createElement('table');
       table.className = 'drilldown-table';
-      table.setAttribute('aria-label', `${title} within ${label}`);
+      table.setAttribute('aria-label', `${title} within ${parentLabel}`);
       const thead = document.createElement('thead');
       const header = document.createElement('tr');
-      ['Group', 'Credits', 'Calls'].forEach((text, index) => {
+      ['Group', 'Credits', 'Tool calls'].forEach((text, index) => {
         const th = document.createElement('th');
         th.scope = 'col';
         th.textContent = text;
@@ -697,7 +706,7 @@
         const detailRow = document.createElement('tr');
         const name = document.createElement('th');
         name.scope = 'row';
-        name.textContent = detail.label;
+        name.textContent = displayLabel(detailKey, detail.label);
         detailRow.append(name);
         cell(detailRow, whole.format(credits(detail)), 'numeric');
         cell(detailRow, whole.format(detail.calls), 'numeric');
@@ -732,19 +741,25 @@
       const maximum = Math.max(...rows.map((item) => Math.abs(credits(item))), 0);
       [...rows].reverse().forEach((item) => {
         const row = document.createElement('tr');
+        row.className = 'expandable-row';
         const heading = document.createElement('th');
         heading.scope = 'row';
         const headingLayout = document.createElement('span');
         headingLayout.className = 'row-heading';
         const headingText = document.createElement('span');
-        headingText.textContent = item.label;
+        const groupKey = recordKey(panel.dataset.breakdownGroup);
+        const visibleLabel = displayLabel(groupKey, item.label);
+        headingText.textContent = visibleLabel;
         const rowKey = `${panel.dataset.breakdownGroup}:${item.label}`;
         const expand = document.createElement('button');
         expand.type = 'button';
         expand.className = 'expand-row';
-        expand.textContent = expandedRows.has(rowKey) ? 'Collapse' : 'Expand';
         expand.setAttribute('aria-expanded', String(expandedRows.has(rowKey)));
-        expand.setAttribute('aria-label', `${expandedRows.has(rowKey) ? 'Collapse' : 'Expand'} details for ${item.label}`);
+        expand.setAttribute('aria-label', `${expandedRows.has(rowKey) ? 'Hide' : 'Show'} details for ${visibleLabel}`);
+        const arrow = document.createElement('span');
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.textContent = '›';
+        expand.append(arrow);
         headingLayout.append(headingText, expand);
         heading.append(headingLayout);
         row.append(heading);
@@ -767,7 +782,7 @@
         if (withPrices) cell(row, item.estimated_usd == null ? '—' : `USD ${costNumber.format(Number(item.estimated_usd))}`, 'numeric');
         tbody.append(row);
         if (expandedRows.has(rowKey)) tbody.append(makeDrilldownRow(panel.dataset.breakdownGroup, item.label, withPrices ? 8 : 7));
-        expand.addEventListener('click', () => {
+        row.addEventListener('click', () => {
           if (expandedRows.has(rowKey)) expandedRows.delete(rowKey);
           else expandedRows.add(rowKey);
           updateBreakdowns(groups);

@@ -18,6 +18,7 @@ from .config import atomic_write
 from .database import connect_history, secure_history_files
 from .history import active_events, latest_run
 from .pricing import estimate_costs
+from .privacy import friendly_session_label
 
 MODEL_COLORS = ("#008a00", "#7bc87a", "#ba8e6b", "#ec7a2e", "#8a9499", "#33a133")
 
@@ -114,16 +115,18 @@ def _table_panel(
     max_credits = max((abs(row["credits"]) for row in rows), default=Decimal(0))
     body = []
     for row in reversed(rows):
+        display_label = friendly_session_label(row["label"]) if tab_id == "session" else row["label"]
         price = ""
         if prices is not None:
             price = f'<td class="numeric">{_escape(_money(prices.get(row["label"]), "USD"))}</td>'
         share = "—" if row["cache_share"] is None else f"{row['cache_share'] * 100:.1f}%"
         width = Decimal(0) if not max_credits else abs(row["credits"]) / max_credits * 100
         body.append(
-            '<tr><th scope="row"><span class="row-heading"><span>' + _escape(row["label"]) + '</span>'
+            '<tr class="expandable-row"><th scope="row"><span class="row-heading"><span>' + _escape(display_label) + '</span>'
             f'<button type="button" class="expand-row" aria-expanded="false" '
-            f'aria-label="Expand details for {_escape(row["label"])}" '
-            f'data-expand-group="{_escape(tab_id)}" data-expand-label="{_escape(row["label"])}">Expand</button></span></th>'
+            f'aria-label="Show details for {_escape(display_label)}" '
+            f'data-expand-group="{_escape(tab_id)}" data-expand-label="{_escape(row["label"])}">'
+            '<span aria-hidden="true">›</span></button></span></th>'
             '<td class="credits-cell numeric"><strong>' + _escape(_credits(row["credits"])) + "</strong>"
             f'<span class="credit-bar" aria-hidden="true"><span style="width:{float(width):.2f}%"></span></span></td>'
             f'<td class="numeric">{_number(row["calls"])}</td>'
@@ -142,7 +145,7 @@ def _table_panel(
         '<div class="table-wrap"><table>'
         f'<caption>{_escape(title)} usage breakdown</caption><thead><tr>'
         '<th scope="col">Period or group</th><th scope="col" class="numeric">Credits</th>'
-        '<th scope="col" class="numeric">Calls</th><th scope="col" class="numeric">Input</th>'
+        '<th scope="col" class="numeric">Tool calls</th><th scope="col" class="numeric">Input</th>'
         '<th scope="col" class="numeric">Output</th><th scope="col" class="numeric">Cache read</th>'
         f'<th scope="col" class="numeric">Cache share</th>{price_head}</tr></thead><tbody>'
         + ("".join(body) or f'<tr><td colspan="{column_count}" class="empty">No usage events.</td></tr>')
@@ -355,6 +358,11 @@ def _filter_payload(
             "usd_to_nok": None if usd_to_nok is None else str(usd_to_nok),
         },
     }
+    if include_sessions:
+        payload["chat_names"] = {
+            item["label"]: friendly_session_label(item["label"])
+            for item in data["groups"].get("session", [])
+        }
     return _escape(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
 
 

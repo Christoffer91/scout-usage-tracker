@@ -135,7 +135,7 @@ The tracker never stores:
 
 Runtime directories use mode `0700`. Config, the HMAC secret, history database, dashboard, and logs use mode `0600`. Text inserted into the dashboard is HTML-escaped, and the generated file has a restrictive Content Security Policy.
 
-Chat reporting is off by default. If explicitly enabled, the **By chats** tab and expandable table rows use short HMAC-derived labels rather than raw session identifiers. The HTML dashboard is still private usage metadata: review it before sharing.
+Chat reporting is off by default. If explicitly enabled, the **By chats** tab and expandable table rows show stable, friendly pseudonyms derived from one-way HMAC labels rather than raw session identifiers or chat contents. The HTML dashboard is still private usage metadata: review it before sharing.
 
 ## Configuration
 
