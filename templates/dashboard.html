@@ -266,7 +266,7 @@
     .warning-list { margin-top: 16px; color: var(--d-muted-text); font-size: 12.5px; }
     .warning-list ul { margin: 0; padding-left: 18px; }
     footer { color: var(--d-muted-text); font-size: 12px; line-height: 1.6; }
-    @media (max-width: 940px) {
+    @media (max-width: 1200px) {
       .chart-row { grid-template-columns: 1fr; }
       .hero-kpis { width: 100%; margin-left: 0; }
       .hero-kpi { flex: 1; }
@@ -280,7 +280,9 @@
       .spark-wrap, .sparkline { width: min(100%, 320px); }
       .hero-kpis { gap: 18px; }
       .hero-kpi { min-width: 125px; }
-      .model-layout { align-items: flex-start; flex-wrap: wrap; }
+      .model-layout { align-items: flex-start; flex-direction: column; }
+      .model-legend { width: 100%; }
+      .quiet-row { grid-template-columns: minmax(0, 1fr); }
       .chart-meta { align-items: flex-end; flex-direction: column; gap: 2px; }
       .quiet-card dl { grid-template-columns: 1fr; gap: 2px; }
       .quiet-card dd { margin-bottom: 8px; text-align: left; }
