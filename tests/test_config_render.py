@@ -163,6 +163,8 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn('class="expand-row"', text)
         self.assertIn('class="expandable-row"', text)
         self.assertIn('aria-hidden="true">›</span>', text)
+        self.assertIn('headingLayout.append(expand, headingText)', text)
+        self.assertIn('justify-content: flex-start; gap: 6px', text)
         self.assertNotIn(">Expand</button>", text)
         self.assertIn("makeDrilldownRow", text)
         self.assertIn("drilldownDefinitions", text)

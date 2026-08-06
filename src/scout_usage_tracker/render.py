@@ -122,11 +122,11 @@ def _table_panel(
         share = "—" if row["cache_share"] is None else f"{row['cache_share'] * 100:.1f}%"
         width = Decimal(0) if not max_credits else abs(row["credits"]) / max_credits * 100
         body.append(
-            '<tr class="expandable-row"><th scope="row"><span class="row-heading"><span>' + _escape(display_label) + '</span>'
+            '<tr class="expandable-row"><th scope="row"><span class="row-heading">'
             f'<button type="button" class="expand-row" aria-expanded="false" '
             f'aria-label="Show details for {_escape(display_label)}" '
             f'data-expand-group="{_escape(tab_id)}" data-expand-label="{_escape(row["label"])}">'
-            '<span aria-hidden="true">›</span></button></span></th>'
+            '<span aria-hidden="true">›</span></button><span>' + _escape(display_label) + '</span></span></th>'
             '<td class="credits-cell numeric"><strong>' + _escape(_credits(row["credits"])) + "</strong>"
             f'<span class="credit-bar" aria-hidden="true"><span style="width:{float(width):.2f}%"></span></span></td>'
             f'<td class="numeric">{_number(row["calls"])}</td>'

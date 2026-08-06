@@ -301,7 +301,7 @@
     th, td { padding: 11px 8px; border-bottom: 1px solid var(--d-border); }
     thead th { color: var(--d-muted-text); font-size: 12px; font-weight: 600; text-align: left; }
     tbody th { max-width: 240px; color: var(--d-strong); font-weight: 600; text-align: left; overflow-wrap: anywhere; }
-    .row-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .row-heading { display: flex; align-items: center; justify-content: flex-start; gap: 6px; }
     .expandable-row { cursor: pointer; }
     .expandable-row > th, .expandable-row > td { transition: background-color 120ms ease; }
     .expandable-row:hover > th, .expandable-row:hover > td,
@@ -760,7 +760,7 @@
         arrow.setAttribute('aria-hidden', 'true');
         arrow.textContent = '›';
         expand.append(arrow);
-        headingLayout.append(headingText, expand);
+        headingLayout.append(expand, headingText);
         heading.append(headingLayout);
         row.append(heading);
         const creditCell = cell(row, '', 'credits-cell numeric');

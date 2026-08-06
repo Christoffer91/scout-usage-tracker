@@ -137,6 +137,8 @@ Runtime directories use mode `0700`. Config, the HMAC secret, history database, 
 
 Chat reporting is off by default. If explicitly enabled, the **By chats** tab and expandable table rows show stable, friendly pseudonyms derived from one-way HMAC labels rather than raw session identifiers or chat contents. The HTML dashboard is still private usage metadata: review it before sharing.
 
+Scout's visible chat names are stored in a separate encrypted session index, not in `assistant_usage_events`, and Scout currently exposes no supported read-only metadata API for them. The tracker therefore does not attempt to decrypt that index or substitute the database's longer session summaries as titles. Exact Scout names can only be added safely if Scout provides a supported local metadata export or API.
+
 ## Configuration
 
 The first install creates `~/.config/scout-usage-tracker/config.json` from [config.example.json](config.example.json) without overwriting an existing file.
