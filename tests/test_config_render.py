@@ -108,7 +108,8 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;alert", text)
         self.assertNotIn('<script>alert("x")</script>', text)
         self.assertNotIn("raw-secret-session", text)
-        self.assertIn("By anonymized session", text)
+        self.assertIn("By anonymized chat", text)
+        self.assertIn(">By chats</button>", text)
         self.assertIn("&lt;b&gt;bad&lt;/b&gt;", text)
         self.assertIn("Account-wide Copilot total (manual)", text)
         self.assertIn("Account-wide additional usage in USD (manual)", text)
@@ -122,7 +123,8 @@ class ConfigRenderTests(unittest.TestCase):
         make_source(source, [event()]); import_usage(source, history, b"y" * 32)
         render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
                           "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None})
-        self.assertNotIn("By anonymized session", dashboard.read_text())
+        self.assertNotIn("By anonymized chat", dashboard.read_text())
+        self.assertNotIn(">By chats</button>", dashboard.read_text())
 
     def test_redesigned_dashboard_is_self_contained_and_accessible(self):
         source = self.root / "source.sqlite3"; history = self.root / "history.sqlite3"; dashboard = self.root / "dashboard.html"
@@ -156,6 +158,9 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("perspective(520px)", text)
         self.assertIn("resetDonutLift", text)
         self.assertIn(".donut.is-hovered { transform: none", text)
+        self.assertIn('class="expand-row"', text)
+        self.assertIn("makeDrilldownRow", text)
+        self.assertIn("drilldownDefinitions", text)
         self.assertIn("@media (max-width: 1200px)", text)
         self.assertIn(".model-legend { width: 100%; }", text)
         self.assertIn(".quiet-row { grid-template-columns: minmax(0, 1fr); }", text)
@@ -185,7 +190,10 @@ class ConfigRenderTests(unittest.TestCase):
         payload = json.loads(unescape(match.group(1)))
         self.assertEqual([model["id"] for model in payload["models"]], ["model-a", "model-b"])
         self.assertEqual([model["total"]["nano"] for model in payload["models"]], ["1000000000", "2000000000"])
-        self.assertEqual(set(payload), {"models", "window_end", "money"})
+        self.assertEqual(set(payload), {"models", "records", "window_end", "money"})
+        self.assertEqual(len(payload["records"]), 2)
+        self.assertEqual({record["model"] for record in payload["records"]}, {"model-a", "model-b"})
+        self.assertTrue(all(len(record["chat"]) == 12 for record in payload["records"]))
         self.assertNotIn("private-one", text)
         self.assertNotIn("private-two", text)
         serialized = json.dumps(payload)

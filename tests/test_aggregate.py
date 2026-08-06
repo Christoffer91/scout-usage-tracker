@@ -1,7 +1,7 @@
 import unittest
 from decimal import Decimal
 
-from scout_usage_tracker.aggregate import aggregate
+from scout_usage_tracker.aggregate import aggregate, drilldown_records
 
 
 def row(at, model="m", nano=10, session="a" * 64):
@@ -37,3 +37,18 @@ class AggregateTests(unittest.TestCase):
                 )
         self.assertEqual({item["label"] for item in result["groups"]["model"]}, {"a", "b"})
         self.assertEqual(result["groups"]["session"][0]["label"], "aaaaaaaaaaaa")
+
+    def test_drilldown_records_are_aggregate_and_chat_labels_are_opt_in(self):
+        rows = [
+            row("2025-01-01T10:00:00+00:00", "model-a", 7, "a" * 64),
+            row("2025-01-01T11:00:00+00:00", "model-a", 5, "a" * 64),
+            row("2025-01-01T12:00:00+00:00", "model-b", 3, "b" * 64),
+        ]
+        private = drilldown_records(rows, "UTC", include_sessions=True)
+        self.assertEqual(len(private), 2)
+        self.assertEqual(private[0]["calls"], 2)
+        self.assertEqual(private[0]["chat"], "aaaaaaaaaaaa")
+        self.assertNotIn("session_digest", private[0])
+        public = drilldown_records(rows, "UTC", include_sessions=False)
+        self.assertEqual(len(public), 2)
+        self.assertTrue(all("chat" not in item for item in public))

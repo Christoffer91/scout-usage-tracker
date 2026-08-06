@@ -57,7 +57,7 @@ If any requirement fails, diagnose it safely and explain the smallest corrective
 - Independent verification using `token_details_json`.
 - A private SQLite history with incremental, duplicate-safe imports.
 - A responsive light/dark dashboard with no external assets or network requests.
-- Optional anonymized session reporting, plan context, billing estimates, and explicit aggregate GitHub billing snapshots — all disabled or empty by default.
+- Optional anonymized chat reporting, plan context, billing estimates, and explicit aggregate GitHub billing snapshots — all disabled or empty by default.
 
 <p align="center">
   <img src="docs/images/synthetic-dashboard-mobile.png" width="390" alt="Synthetic Scout Usage Tracker dashboard in a narrow mobile layout">
@@ -135,7 +135,7 @@ The tracker never stores:
 
 Runtime directories use mode `0700`. Config, the HMAC secret, history database, dashboard, and logs use mode `0600`. Text inserted into the dashboard is HTML-escaped, and the generated file has a restrictive Content Security Policy.
 
-Session reporting is off by default. If explicitly enabled, sessions use short HMAC-derived labels rather than raw identifiers. The HTML dashboard is still private usage metadata: review it before sharing.
+Chat reporting is off by default. If explicitly enabled, the **By chats** tab and expandable table rows use short HMAC-derived labels rather than raw session identifiers. The HTML dashboard is still private usage metadata: review it before sharing.
 
 ## Configuration
 
@@ -148,7 +148,7 @@ The first install creates `~/.config/scout-usage-tracker/config.json` from [conf
 - `history_database`: the tracker's private retained history.
 - `dashboard_path`: where the standalone HTML report is written.
 - `timezone`: `local` or an IANA zone such as `Europe/Oslo`.
-- `privacy.include_sessions`: defaults to `false`; enables only anonymized session labels.
+- `privacy.include_sessions`: defaults to `false`; enables only anonymized chat labels and chat drill-downs.
 - `usd_per_credit_by_model`: optional model-specific USD-per-credit estimates.
 - `usd_to_nok`: optional manually supplied exchange rate.
 - `billing.enabled`: enables plan/billing context in the report; it does not enable network access.

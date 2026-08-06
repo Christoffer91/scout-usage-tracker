@@ -91,3 +91,35 @@ def aggregate(rows: Iterable[Any], timezone_name: str, include_sessions: bool = 
         "last_event": last.isoformat() if last else None,
         "timezone": timezone_name,
     }
+
+
+def drilldown_records(rows: Iterable[Any], timezone_name: str, include_sessions: bool = False) -> list[dict[str, Any]]:
+    """Return privacy-safe model/period/chat intersections for dashboard drill-downs."""
+    zone = local_zone(timezone_name)
+    groups: dict[tuple[str, str, str, str, str], dict[str, int]] = defaultdict(_blank)
+    for row in rows:
+        instant = datetime.fromisoformat(row["event_time_utc"]).astimezone(zone)
+        iso = instant.isocalendar()
+        chat = session_label(row["session_digest"]) if include_sessions else ""
+        key = (
+            row["model"],
+            instant.date().isoformat(),
+            f"{iso.year}-W{iso.week:02d}",
+            f"{instant.year:04d}-{instant.month:02d}",
+            chat,
+        )
+        _add(groups[key], row)
+
+    records = []
+    for (model, day, week, month, chat), values in sorted(groups.items()):
+        record: dict[str, Any] = {
+            "model": model,
+            "day": day,
+            "week": week,
+            "month": month,
+            **values,
+        }
+        if include_sessions:
+            record["chat"] = chat
+        records.append(record)
+    return records

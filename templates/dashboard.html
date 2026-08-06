@@ -301,6 +301,29 @@
     th, td { padding: 11px 8px; border-bottom: 1px solid var(--d-border); }
     thead th { color: var(--d-muted-text); font-size: 12px; font-weight: 600; text-align: left; }
     tbody th { max-width: 240px; color: var(--d-strong); font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+    .row-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .expand-row {
+      flex: none;
+      padding: 4px 7px;
+      border: 1px solid var(--d-border);
+      border-radius: 5px;
+      background: transparent;
+      color: var(--d-accent);
+      font-size: 11px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .expand-row:hover { border-color: var(--d-accent); background: var(--d-bg); }
+    .expand-row::before { content: "+ "; }
+    .expand-row[aria-expanded="true"]::before { content: "− "; }
+    .drilldown-row > td { padding: 14px 16px 18px; background: color-mix(in srgb, var(--d-accent) 3%, var(--d-card)); }
+    .drilldown-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .drilldown-section { min-width: 0; padding: 12px; border: 1px solid var(--d-border); border-radius: 8px; background: var(--d-card); }
+    .drilldown-section h3 { margin: 0 0 8px; color: var(--d-strong); font-size: 12px; }
+    .drilldown-table { width: 100%; min-width: 0; font-size: 12px; }
+    .drilldown-table th, .drilldown-table td { padding: 7px 5px; }
+    .drilldown-table thead th { font-size: 10.5px; }
+    .drilldown-table tbody th { max-width: 180px; font-weight: 550; }
     .numeric { text-align: right; }
     .credits-cell { min-width: 175px; }
     .credits-cell strong { display: inline-block; min-width: 72px; color: var(--d-strong); }
@@ -480,6 +503,7 @@
   let filterData = { models: [], money: { mode: 'none' } };
   try { filterData = JSON.parse(dashboard.dataset.filterData || '{}'); } catch (_) {}
   const models = Array.isArray(filterData.models) ? filterData.models : [];
+  const drilldownRecords = Array.isArray(filterData.records) ? filterData.records : [];
   if (!models.length) return;
 
   const selected = new Set(models.map((model) => model.id));
@@ -618,6 +642,80 @@
     row.append(element);
     return element;
   };
+  const expandedRows = new Set();
+  const recordKey = (group) => group === 'session' ? 'chat' : group;
+  const groupedDetails = (source, key) => {
+    const grouped = new Map();
+    source.forEach((record) => {
+      const label = record[key];
+      if (!label) return;
+      if (!grouped.has(label)) grouped.set(label, { ...blank(), label });
+      add(grouped.get(label), record);
+    });
+    const rows = Array.from(grouped.values());
+    if (['day', 'week', 'month'].includes(key)) return rows.sort((a, b) => b.label.localeCompare(a.label));
+    return rows.sort((a, b) => credits(b) - credits(a) || a.label.localeCompare(b.label));
+  };
+  const drilldownDefinitions = (group) => ({
+    day: [['Models', 'model'], ['Chats', 'chat']],
+    week: [['Days', 'day'], ['Models', 'model'], ['Chats', 'chat']],
+    month: [['ISO weeks', 'week'], ['Models', 'model'], ['Chats', 'chat']],
+    model: [['Days', 'day'], ['Chats', 'chat']],
+    session: [['Days', 'day'], ['Models', 'model']],
+  }[group] || []);
+  const makeDrilldownRow = (group, label, columnCount) => {
+    const row = document.createElement('tr');
+    row.className = 'drilldown-row';
+    const container = cell(row, '');
+    container.colSpan = columnCount;
+    const grid = document.createElement('div');
+    grid.className = 'drilldown-grid';
+    const key = recordKey(group);
+    const source = drilldownRecords.filter((record) => selected.has(record.model) && record[key] === label);
+    drilldownDefinitions(group).forEach(([title, detailKey]) => {
+      const details = groupedDetails(source, detailKey);
+      if (!details.length) return;
+      const section = document.createElement('section');
+      section.className = 'drilldown-section';
+      const heading = document.createElement('h3');
+      heading.textContent = title;
+      const table = document.createElement('table');
+      table.className = 'drilldown-table';
+      table.setAttribute('aria-label', `${title} within ${label}`);
+      const thead = document.createElement('thead');
+      const header = document.createElement('tr');
+      ['Group', 'Credits', 'Calls'].forEach((text, index) => {
+        const th = document.createElement('th');
+        th.scope = 'col';
+        th.textContent = text;
+        if (index) th.className = 'numeric';
+        header.append(th);
+      });
+      thead.append(header);
+      const tbody = document.createElement('tbody');
+      details.forEach((detail) => {
+        const detailRow = document.createElement('tr');
+        const name = document.createElement('th');
+        name.scope = 'row';
+        name.textContent = detail.label;
+        detailRow.append(name);
+        cell(detailRow, whole.format(credits(detail)), 'numeric');
+        cell(detailRow, whole.format(detail.calls), 'numeric');
+        tbody.append(detailRow);
+      });
+      table.append(thead, tbody);
+      section.append(heading, table);
+      grid.append(section);
+    });
+    if (!grid.children.length) {
+      const empty = document.createElement('p');
+      empty.className = 'empty';
+      empty.textContent = 'No additional aggregate detail is available.';
+      grid.append(empty);
+    }
+    container.append(grid);
+    return row;
+  };
   const updateBreakdowns = (groups) => {
     document.querySelectorAll('[data-breakdown-group]').forEach((panel) => {
       const rows = groups[panel.dataset.breakdownGroup] || [];
@@ -636,7 +734,19 @@
         const row = document.createElement('tr');
         const heading = document.createElement('th');
         heading.scope = 'row';
-        heading.textContent = item.label;
+        const headingLayout = document.createElement('span');
+        headingLayout.className = 'row-heading';
+        const headingText = document.createElement('span');
+        headingText.textContent = item.label;
+        const rowKey = `${panel.dataset.breakdownGroup}:${item.label}`;
+        const expand = document.createElement('button');
+        expand.type = 'button';
+        expand.className = 'expand-row';
+        expand.textContent = expandedRows.has(rowKey) ? 'Collapse' : 'Expand';
+        expand.setAttribute('aria-expanded', String(expandedRows.has(rowKey)));
+        expand.setAttribute('aria-label', `${expandedRows.has(rowKey) ? 'Collapse' : 'Expand'} details for ${item.label}`);
+        headingLayout.append(headingText, expand);
+        heading.append(headingLayout);
         row.append(heading);
         const creditCell = cell(row, '', 'credits-cell numeric');
         const strong = document.createElement('strong');
@@ -656,6 +766,12 @@
         cell(row, denominator ? `${(item.cache_read / denominator * 100).toFixed(1)}%` : '—', 'numeric');
         if (withPrices) cell(row, item.estimated_usd == null ? '—' : `USD ${costNumber.format(Number(item.estimated_usd))}`, 'numeric');
         tbody.append(row);
+        if (expandedRows.has(rowKey)) tbody.append(makeDrilldownRow(panel.dataset.breakdownGroup, item.label, withPrices ? 8 : 7));
+        expand.addEventListener('click', () => {
+          if (expandedRows.has(rowKey)) expandedRows.delete(rowKey);
+          else expandedRows.add(rowKey);
+          updateBreakdowns(groups);
+        });
       });
     });
   };

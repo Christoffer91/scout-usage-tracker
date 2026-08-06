@@ -12,7 +12,7 @@ from pathlib import Path
 from statistics import fmean, pstdev
 from typing import Any
 
-from .aggregate import aggregate, local_zone
+from .aggregate import aggregate, drilldown_records, local_zone
 from .billing import billing_summary
 from .config import atomic_write
 from .database import connect_history, secure_history_files
@@ -120,7 +120,10 @@ def _table_panel(
         share = "—" if row["cache_share"] is None else f"{row['cache_share'] * 100:.1f}%"
         width = Decimal(0) if not max_credits else abs(row["credits"]) / max_credits * 100
         body.append(
-            '<tr><th scope="row">' + _escape(row["label"]) + "</th>"
+            '<tr><th scope="row"><span class="row-heading"><span>' + _escape(row["label"]) + '</span>'
+            f'<button type="button" class="expand-row" aria-expanded="false" '
+            f'aria-label="Expand details for {_escape(row["label"])}" '
+            f'data-expand-group="{_escape(tab_id)}" data-expand-label="{_escape(row["label"])}">Expand</button></span></th>'
             '<td class="credits-cell numeric"><strong>' + _escape(_credits(row["credits"])) + "</strong>"
             f'<span class="credit-bar" aria-hidden="true"><span style="width:{float(width):.2f}%"></span></span></td>'
             f'<td class="numeric">{_number(row["calls"])}</td>'
@@ -155,7 +158,7 @@ def _breakdown(data: dict[str, Any], model_prices: dict[str, Decimal | None]) ->
         ("model", "By model", "By model", data["groups"]["model"], model_prices),
     ]
     if "session" in data["groups"]:
-        definitions.append(("session", "By session", "By anonymized session", data["groups"]["session"], None))
+        definitions.append(("session", "By chats", "By anonymized chat", data["groups"]["session"], None))
     tabs = []
     panels = []
     for index, (tab_id, label, title, rows, prices) in enumerate(definitions):
@@ -288,14 +291,16 @@ def _model_share(models: list[dict[str, Any]]) -> str:
 
 
 def _filter_metrics(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "label": item.get("label"),
+    result = {
         "nano": str(item["nano"]),
         "calls": item["calls"],
         "input": item["input"],
         "output": item["output"],
         "cache_read": item["cache_read"],
     }
+    if "label" in item:
+        result["label"] = item["label"]
+    return result
 
 
 def _filter_payload(
@@ -335,6 +340,14 @@ def _filter_payload(
         money_mode = "credit"
     payload = {
         "models": models,
+        "records": [
+            {
+                **{name: item[name] for name in ("model", "day", "week", "month")},
+                **({"chat": item["chat"]} if "chat" in item else {}),
+                **_filter_metrics(item),
+            }
+            for item in drilldown_records(rows, config["timezone"], include_sessions)
+        ],
         "window_end": data["groups"]["day"][-1]["label"] if data["groups"]["day"] else None,
         "money": {
             "mode": money_mode,
