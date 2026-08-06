@@ -41,6 +41,7 @@
       --d-shadow: none;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html { background: var(--d-bg); }
     body {
       margin: 0;
@@ -183,6 +184,7 @@
       cursor: crosshair;
     }
     .bar-fill { width: 100%; min-height: 3px; border-radius: 2px 2px 0 0; background: var(--d-bar); }
+    .bar-fill.empty { min-height: 0; }
     .bar-hit:hover .bar-fill, .bar-hit:focus-visible .bar-fill { background: var(--d-bar-hi); }
     .bar-fill.spike { background: var(--d-spike); }
     .bar-fill.latest { box-shadow: inset 0 0 0 2px var(--d-accent); }

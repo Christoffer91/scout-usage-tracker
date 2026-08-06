@@ -4,13 +4,14 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 
 from scout_usage_tracker.config import ConfigError, load_config
 from scout_usage_tracker.cli import command_update
 from scout_usage_tracker.import_usage import import_usage
-from scout_usage_tracker.render import render_dashboard
+from scout_usage_tracker.render import _calendar_window, _credits, _display_datetime, render_dashboard
 
 from tests.helpers import event, make_source
 
@@ -142,6 +143,26 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertNotIn("title=", text)
         self.assertNotIn('<script src=', text)
         self.assertNotIn('<link rel="stylesheet"', text)
+        self.assertEqual(text.count('class="bar-hit"'), 60)
+        self.assertEqual(text.count('bar-fill empty'), 59)
+
+    def test_sparse_daily_usage_fills_fixed_calendar_window(self):
+        daily = [
+            {"label": "2025-01-01", "credits": Decimal("1")},
+            {"label": "2025-01-03", "credits": Decimal("3")},
+        ]
+        window = _calendar_window(daily, 3)
+        self.assertEqual([row["label"] for row in window], ["2025-01-01", "2025-01-02", "2025-01-03"])
+        self.assertEqual([row["credits"] for row in window], [Decimal("1"), Decimal("0"), Decimal("3")])
+
+    def test_displayed_credits_are_whole_numbers(self):
+        self.assertEqual(_credits(Decimal("8366.706885")), "8,367")
+        self.assertEqual(_credits(Decimal("130.06365")), "130")
+
+    def test_visible_dates_are_human_readable_and_local(self):
+        self.assertEqual(_display_datetime("2026-08-05T12:01:08.565Z", "Europe/Oslo"), "5 Aug 2026, 14:01")
+        self.assertEqual(_display_datetime("2026-02-03", "UTC"), "3 Feb 2026")
+        self.assertEqual(_display_datetime("fictional", "UTC"), "fictional")
 
     def test_verification_overall_mismatch_and_incomplete(self):
         for name, details, total, expected in (

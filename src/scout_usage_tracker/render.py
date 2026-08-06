@@ -6,13 +6,13 @@ import html
 import json
 import math
 import os
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from statistics import fmean, pstdev
 from typing import Any
 
-from .aggregate import aggregate
+from .aggregate import aggregate, local_zone
 from .config import atomic_write
 from .database import connect_history, secure_history_files
 from .history import active_events, latest_run
@@ -28,6 +28,14 @@ def _escape(value: Any) -> str:
 def _decimal(value: Decimal, places: int = 9) -> str:
     text = f"{value:.{places}f}"
     return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _credits(value: Any) -> str:
+    try:
+        number = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return str(value)
+    return f"{number:,.0f}"
 
 
 def _number(value: int) -> str:
@@ -56,6 +64,40 @@ def _friendly_day(value: str) -> str:
         return value
 
 
+def _display_datetime(value: Any, timezone_name: str | None = None) -> str:
+    if value in (None, ""):
+        return "—"
+    source = str(value)
+    try:
+        instant = datetime.fromisoformat(source.replace("Z", "+00:00"))
+    except ValueError:
+        return source
+    includes_time = "T" in source or " " in source
+    if includes_time and timezone_name and instant.tzinfo is not None:
+        instant = instant.astimezone(local_zone(timezone_name))
+    date_text = f"{instant.day} {instant.strftime('%b')} {instant.year}"
+    return f"{date_text}, {instant.strftime('%H:%M')}" if includes_time else date_text
+
+
+def _calendar_window(daily: list[dict[str, Any]], days: int) -> list[dict[str, Any]]:
+    """Return a fixed calendar window ending on the latest retained usage day."""
+    if not daily:
+        return []
+    try:
+        end = date.fromisoformat(str(daily[-1]["label"]))
+    except (KeyError, TypeError, ValueError):
+        return daily[-days:]
+    by_day = {str(row["label"]): row for row in daily}
+    start = end - timedelta(days=days - 1)
+    return [
+        {
+            "label": (day := start + timedelta(days=offset)).isoformat(),
+            "credits": by_day.get(day.isoformat(), {}).get("credits", Decimal(0)),
+        }
+        for offset in range(days)
+    ]
+
+
 def _table_panel(
     tab_id: str,
     title: str,
@@ -74,7 +116,7 @@ def _table_panel(
         width = Decimal(0) if not max_credits else abs(row["credits"]) / max_credits * 100
         body.append(
             '<tr><th scope="row">' + _escape(row["label"]) + "</th>"
-            '<td class="credits-cell numeric"><strong>' + _escape(_decimal(row["credits"])) + "</strong>"
+            '<td class="credits-cell numeric"><strong>' + _escape(_credits(row["credits"])) + "</strong>"
             f'<span class="credit-bar" aria-hidden="true"><span style="width:{float(width):.2f}%"></span></span></td>'
             f'<td class="numeric">{_number(row["calls"])}</td>'
             f'<td class="numeric">{_number(row["input"])}</td>'
@@ -126,7 +168,7 @@ def _breakdown(data: dict[str, Any], model_prices: dict[str, Decimal | None]) ->
 
 
 def _trend(daily: list[dict[str, Any]]) -> tuple[str, str, str]:
-    window = daily[-60:]
+    window = _calendar_window(daily, 60)
     current = sum((row["credits"] for row in window[-30:]), Decimal(0))
     previous = sum((row["credits"] for row in window[-60:-30]), Decimal(0))
     if not previous:
@@ -140,7 +182,7 @@ def _trend(daily: list[dict[str, Any]]) -> tuple[str, str, str]:
 
 
 def _sparkline(daily: list[dict[str, Any]]) -> str:
-    series = daily[-30:]
+    series = _calendar_window(daily, 30)
     if not series:
         return '<div class="spark-empty">No 30-day trend yet</div>'
     values = [float(row["credits"]) for row in series]
@@ -152,7 +194,7 @@ def _sparkline(daily: list[dict[str, Any]]) -> str:
         points.append((round(x, 2), round(y, 2)))
     payload = {
         "labels": [_friendly_day(row["label"]) for row in series],
-        "values": [_decimal(row["credits"]) for row in series],
+        "values": [_credits(row["credits"]) for row in series],
         "points": points,
     }
     polyline = " ".join(f"{x},{y}" for x, y in points)
@@ -167,7 +209,7 @@ def _sparkline(daily: list[dict[str, Any]]) -> str:
 
 
 def _daily_chart(daily: list[dict[str, Any]]) -> str:
-    series = daily[-60:]
+    series = _calendar_window(daily, 60)
     if not series:
         bars = '<p class="empty">No daily usage events.</p>'
         start = end = "—"
@@ -181,10 +223,10 @@ def _daily_chart(daily: list[dict[str, Any]]) -> str:
         for index, (row, value) in enumerate(zip(series, positive)):
             spike = deviation > 0 and value > threshold
             latest = index == len(series) - 1
-            height = max(3.0, value / maximum * 100.0)
-            classes = "bar-fill" + (" spike" if spike else "") + (" latest" if latest else "")
+            height = 0.0 if value == 0 else max(3.0, value / maximum * 100.0)
+            classes = "bar-fill" + (" empty" if value == 0 else "") + (" spike" if spike else "") + (" latest" if latest else "")
             suffix = " · unusually high" if spike else ""
-            tip = f'{_friendly_day(row["label"])} · {_decimal(row["credits"])} credits{suffix}'
+            tip = f'{_friendly_day(row["label"])} · {_credits(row["credits"])} credits{suffix}'
             rendered.append(
                 f'<button type="button" class="bar-hit" data-tip="{_escape(tip)}" '
                 f'aria-label="{_escape(tip)}"><span class="{classes}" style="height:{height:.2f}%"></span></button>'
@@ -215,7 +257,7 @@ def _model_share(models: list[dict[str, Any]]) -> str:
         legend.append(
             f'<button type="button" class="model-row" data-center="{_escape(center)}">'
             f'<i style="--model-color:{color}"></i><span class="model-name">{_escape(label)}</span>'
-            f'<span>{share:.0f}%</span><span>{_escape(_decimal(row["credits"]))}</span></button>'
+            f'<span>{share:.0f}%</span><span>{_escape(_credits(row["credits"]))}</span></button>'
         )
     gradient = "conic-gradient(" + ",".join(stops) + ")" if stops and total else "var(--d-border)"
     return (
@@ -276,8 +318,8 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
         f'<div class="verification-status {status_class}"><strong>{overall_verification}</strong></div><dl>'
         f'<dt>Verified events</dt><dd>{_number(verification_counts.get("verified", 0))} of {_number(len(rows))}</dd>'
         f'<dt>Status counts</dt><dd>{verification_summary}</dd>'
-        f'<dt>First event</dt><dd>{_escape(data["first_event"] or "—")}</dd>'
-        f'<dt>Last event</dt><dd>{_escape(data["last_event"] or "—")}</dd></dl>{impact_html}'
+        f'<dt>First event</dt><dd>{_escape(_display_datetime(data["first_event"], config["timezone"]))}</dd>'
+        f'<dt>Last event</dt><dd>{_escape(_display_datetime(data["last_event"], config["timezone"]))}</dd></dl>{impact_html}'
         f'<div class="warning-list"><h3>Warnings</h3><ul>{warning_html}</ul></div></section>'
     )
 
@@ -286,9 +328,9 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
     if comparison:
         comparison_html = (
             '<section class="quiet-card comparison-card"><h2>Manual account-wide comparison</h2><dl>'
-            f'<dt>Account-wide Copilot total (manual)</dt><dd>{_escape(comparison.get("total", "—"))}</dd>'
+            f'<dt>Account-wide Copilot total (manual)</dt><dd>{_escape(_credits(comparison["total"])) if comparison.get("total") is not None else "—"}</dd>'
             f'<dt>Account-wide additional usage in USD (manual)</dt><dd>{_escape(comparison.get("additional_usage_usd", "—"))}</dd>'
-            f'<dt>As of</dt><dd>{_escape(comparison.get("as_of", "—"))}</dd>'
+            f'<dt>As of</dt><dd>{_escape(_display_datetime(comparison.get("as_of"), config["timezone"]))}</dd>'
             f'<dt>Scope</dt><dd>{_escape(comparison.get("scope", "account-wide/manual"))}</dd>'
             '</dl><p>These are account-wide manual values, never Scout-only measurements.</p></section>'
         )
@@ -304,11 +346,13 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
     delta_text, delta_class, _ = _trend(data["groups"]["day"])
     values = {
         "TITLE": "Scout usage",
-        "UPDATE_TIME": _escape(config.get("_generated_at", datetime.now(timezone.utc).isoformat())),
+        "UPDATE_TIME": _escape(_display_datetime(
+            config.get("_generated_at", datetime.now(timezone.utc).isoformat()), config["timezone"]
+        )),
         "TIMEZONE": _escape(data["timezone"]),
         "VERIFICATION_CHIP": status_chip,
         "VERIFICATION_CLASS": status_class,
-        "TOTAL_CREDITS": _escape(_decimal(total["credits"])),
+        "TOTAL_CREDITS": _escape(_credits(total["credits"])),
         "DELTA_TEXT": _escape(delta_text),
         "DELTA_CLASS": delta_class,
         "SPARKLINE": _sparkline(data["groups"]["day"]),
