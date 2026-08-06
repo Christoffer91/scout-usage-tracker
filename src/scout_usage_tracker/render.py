@@ -210,6 +210,7 @@ def _sparkline(daily: list[dict[str, Any]]) -> str:
 
 def _daily_chart(daily: list[dict[str, Any]]) -> str:
     series = _calendar_window(daily, 60)
+    detect_spikes = len(daily) >= 15
     if not series:
         bars = '<p class="empty">No daily usage events.</p>'
         start = end = "—"
@@ -221,7 +222,7 @@ def _daily_chart(daily: list[dict[str, Any]]) -> str:
         threshold = mean + 1.6 * deviation
         rendered = []
         for index, (row, value) in enumerate(zip(series, positive)):
-            spike = deviation > 0 and value > threshold
+            spike = detect_spikes and deviation > 0 and value > threshold
             latest = index == len(series) - 1
             height = 0.0 if value == 0 else max(3.0, value / maximum * 100.0)
             classes = "bar-fill" + (" empty" if value == 0 else "") + (" spike" if spike else "") + (" latest" if latest else "")
@@ -233,9 +234,10 @@ def _daily_chart(daily: list[dict[str, Any]]) -> str:
             )
         bars = "".join(rendered)
         start, end = _friendly_day(series[0]["label"]), _friendly_day(series[-1]["label"])
+    spike_legend = '<span class="spike-key"><i></i>Unusually high day</span>' if detect_spikes else ""
     return (
         '<section class="card daily-card"><div class="card-heading"><h2>Daily credits</h2>'
-        '<div class="chart-meta"><span class="spike-key"><i></i>Unusually high day</span><span>Last 60 days</span></div></div>'
+        f'<div class="chart-meta">{spike_legend}<span>Last 60 days</span></div></div>'
         '<div class="bar-area" data-bar-chart><div class="chart-tooltip bar-tooltip" role="status" aria-live="polite" hidden></div>'
         f'<div class="bar-chart">{bars}</div></div><div class="axis"><span>{_escape(start)}</span><span>{_escape(end)}</span></div></section>'
     )

@@ -11,7 +11,7 @@ from pathlib import Path
 from scout_usage_tracker.config import ConfigError, load_config
 from scout_usage_tracker.cli import command_update
 from scout_usage_tracker.import_usage import import_usage
-from scout_usage_tracker.render import _calendar_window, _credits, _display_datetime, render_dashboard
+from scout_usage_tracker.render import _calendar_window, _credits, _daily_chart, _display_datetime, render_dashboard
 
 from tests.helpers import event, make_source
 
@@ -140,11 +140,14 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn('data-bar-chart', text)
         self.assertIn('data-model-card', text)
         self.assertIn("Estimated cost", text)
+        self.assertIn("width: 90%", text)
+        self.assertIn("minmax(90px, 1fr)", text)
         self.assertNotIn("title=", text)
         self.assertNotIn('<script src=', text)
         self.assertNotIn('<link rel="stylesheet"', text)
         self.assertEqual(text.count('class="bar-hit"'), 60)
         self.assertEqual(text.count('bar-fill empty'), 59)
+        self.assertNotIn("Unusually high day", text)
 
     def test_sparse_daily_usage_fills_fixed_calendar_window(self):
         daily = [
@@ -163,6 +166,17 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertEqual(_display_datetime("2026-08-05T12:01:08.565Z", "Europe/Oslo"), "5 Aug 2026, 14:01")
         self.assertEqual(_display_datetime("2026-02-03", "UTC"), "3 Feb 2026")
         self.assertEqual(_display_datetime("fictional", "UTC"), "fictional")
+
+    def test_spike_detection_requires_fifteen_usage_days(self):
+        daily = [
+            {"label": f"2025-01-{day:02d}", "credits": Decimal("1")}
+            for day in range(1, 15)
+        ]
+        self.assertNotIn("Unusually high day", _daily_chart(daily))
+        daily.append({"label": "2025-01-15", "credits": Decimal("100")})
+        chart = _daily_chart(daily)
+        self.assertIn("Unusually high day", chart)
+        self.assertIn("unusually high", chart)
 
     def test_verification_overall_mismatch_and_incomplete(self):
         for name, details, total, expected in (
