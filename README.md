@@ -120,6 +120,8 @@ ${HOME}/.local/bin/scout-usage cost --period month
 
 The command reads `~/.scout/copilot/session-store.db` in SQLite read-only mode, uses Scout's active conversation identifier only as a query parameter, and never prints or stores that identifier, prompts, responses, database paths, or raw token details. It makes no network requests. To support ordinary chats plus Copilot-backed calendar and automation surfaces, the explicit skill option installs the same owned skill in both `~/.scout/m-skills/cost` and `~/.copilot/m-skills/cost`; it refuses to overwrite either location when it is not tracker-owned.
 
+Some calendar and automation surfaces do not provide `SESSION_ID` to local tools. In that case, `/cost` fails closed unless exactly one local Scout session has the uniquely freshest usage event within 30 seconds. If another session is active within three seconds, it asks you to wait and retry instead of risking cross-chat attribution. An explicitly supplied session ID is never replaced by this fallback.
+
 Credits are calculated exactly from nano-AIU, then displayed as a rounded whole number to keep the response readable; the output states this distinction rather than calling the displayed integer exact. `AIU data: pass` means stored AIU matched independent token-detail recalculation for the included events; it does not verify GitHub billing. Cost estimates appear only for configured model rates and remain estimates, not bills. For transition-safe day/week/month boundaries, `/cost` requires `timezone` to resolve to an IANA zone such as `Europe/Oslo`.
 
 ## Understanding the numbers

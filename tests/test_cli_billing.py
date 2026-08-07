@@ -11,11 +11,15 @@ from tests.helpers import event, make_source
 
 
 class CliBillingTests(unittest.TestCase):
-    def test_cost_fails_closed_without_active_scout_session(self):
-        error = StringIO()
-        with patch.dict("os.environ", {}, clear=True), redirect_stderr(error):
-            self.assertEqual(command_cost({"source_database": "/not/read", "timezone": "UTC"}), 2)
-        self.assertIn("only inside an active Scout conversation", error.getvalue())
+    def test_cost_delegates_missing_session_to_safe_autodetection(self):
+        output = StringIO()
+        config = {"source_database": "/not/read", "timezone": "UTC", "usd_per_credit_by_model": {}, "usd_to_nok": None}
+        with patch.dict("os.environ", {}, clear=True), \
+             patch("scout_usage_tracker.cli.build_cost_report", return_value=object()) as build, \
+             patch("scout_usage_tracker.cli.format_cost_report", return_value="ok"), redirect_stdout(output):
+            self.assertEqual(command_cost(config), 0)
+        build.assert_called_once_with("/not/read", "", "UTC")
+        self.assertEqual(output.getvalue().strip(), "ok")
 
     def test_github_sync_arguments_are_command_specific(self):
         args = build_parser().parse_args(["github-sync", "--scope", "organization", "--owner", "fictional-org", "--year", "2026", "--month", "8"])

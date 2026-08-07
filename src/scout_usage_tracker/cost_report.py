@@ -56,6 +56,7 @@ class CostReport:
     month: UsageSlice
     integrity: str
     checked_events: int
+    session_resolution: str
 
 
 _REQUIRED_USAGE_COLUMNS = {
@@ -122,6 +123,27 @@ def _bounds(day: date, zone: ZoneInfo) -> dict[str, tuple[datetime, datetime]]:
     }
 
 
+def _resolve_recent_session(connection: sqlite3.Connection, now: datetime) -> str:
+    """Resolve only a uniquely fresh session when Scout omits SESSION_ID."""
+    candidates = connection.execute(
+        """SELECT session_id,
+                  MAX((julianday(created_at) - 2440587.5) * 86400.0) AS latest_epoch
+           FROM assistant_usage_events
+           GROUP BY session_id
+           ORDER BY latest_epoch DESC
+           LIMIT 2"""
+    ).fetchall()
+    if not candidates:
+        raise CostReportError("no recent Scout usage event could identify this conversation")
+    newest = float(candidates[0]["latest_epoch"])
+    age = now.astimezone(timezone.utc).timestamp() - newest
+    if age < -5 or age > 30:
+        raise CostReportError("no uniquely fresh Scout usage event could identify this conversation")
+    if len(candidates) > 1 and newest - float(candidates[1]["latest_epoch"]) < 3:
+        raise CostReportError("multiple Scout conversations are active; wait a few seconds and retry /cost")
+    return str(candidates[0]["session_id"])
+
+
 def build_cost_report(
     source_database: str,
     session_id: str,
@@ -131,8 +153,6 @@ def build_cost_report(
     _after_snapshot: Callable[[], None] | None = None,
 ) -> CostReport:
     """Read exact nano-AIU slices from one consistent SQLite snapshot."""
-    if not session_id.strip():
-        raise CostReportError("no active Scout conversation was identified")
     source = Path(source_database).expanduser()
     if not source.is_file():
         raise CostReportError("Scout usage database was not found")
@@ -152,6 +172,10 @@ def build_cost_report(
             raise CostReportError("Scout usage database has an unsupported assistant_usage_events schema")
 
         connection.execute("BEGIN")
+        resolution = "environment"
+        if not session_id.strip():
+            session_id = _resolve_recent_session(connection, current)
+            resolution = "recent_event"
         # The model call that invokes /cost is already the highest usage turn.
         # This first read fixes the SQLite snapshot and lets us exclude that turn
         # without relying on assistant_response, which unattended Scout surfaces
@@ -204,6 +228,7 @@ def build_cost_report(
             month=_rows_to_slice(period_rows["month"]),
             integrity=integrity,
             checked_events=checked,
+            session_resolution=resolution,
         )
     except CostReportError:
         raise

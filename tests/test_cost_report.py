@@ -57,6 +57,30 @@ class CostReportTests(unittest.TestCase):
             self.assertEqual(report.week.total_nano_aiu, 5_600_000_000)
             self.assertEqual(report.month.total_nano_aiu, 5_600_000_000)
             self.assertEqual((report.integrity, report.checked_events), ("pass", 4))
+            self.assertEqual(report.session_resolution, "environment")
+
+    def test_missing_session_id_autodetects_only_unique_fresh_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source.db"; create_source(source)
+            add_event(source, "target-past", "target", 1, 2_000_000_000, "2026-08-07T11:59:50Z")
+            add_event(source, "other", "other", 1, 9_000_000_000, "2026-08-07T11:59:51Z")
+            add_event(source, "target-current", "target", 2, 1, "2026-08-07T11:59:59Z")
+            report = build_cost_report(source, "", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
+            self.assertEqual(report.session_resolution, "recent_event")
+            self.assertEqual(report.thread.total_nano_aiu, 2_000_000_000)
+
+    def test_missing_session_id_rejects_stale_or_ambiguous_candidates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stale = Path(temporary) / "stale.db"; create_source(stale)
+            add_event(stale, "old", "s", 1, 1, "2026-08-07T11:59:29Z")
+            with self.assertRaisesRegex(CostReportError, "no uniquely fresh"):
+                build_cost_report(stale, "", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
+
+            ambiguous = Path(temporary) / "ambiguous.db"; create_source(ambiguous)
+            add_event(ambiguous, "one", "one", 1, 1, "2026-08-07T11:59:59Z")
+            add_event(ambiguous, "two", "two", 1, 1, "2026-08-07T11:59:57Z")
+            with self.assertRaisesRegex(CostReportError, "multiple Scout conversations"):
+                build_cost_report(ambiguous, "", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
 
     def test_null_assistant_response_is_irrelevant_and_fresh_chat_reports_zero(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -141,7 +165,7 @@ class CostReportTests(unittest.TestCase):
             with self.assertRaisesRegex(CostReportError, "not found"):
                 build_cost_report(root / "missing.db", "s", "UTC")
             source = root / "source.db"; create_source(source)
-            with self.assertRaisesRegex(CostReportError, "no active"):
+            with self.assertRaisesRegex(CostReportError, "no recent Scout usage event"):
                 build_cost_report(source, "", "UTC")
             with self.assertRaisesRegex(CostReportError, "no Scout usage events"):
                 build_cost_report(source, "s", "UTC")

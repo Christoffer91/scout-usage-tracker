@@ -63,9 +63,6 @@ def command_status(config: dict) -> int:
 
 def command_cost(config: dict, period: str = "thread") -> int:
     session_id = os.environ.get("SESSION_ID", "")
-    if not session_id:
-        print("FAIL: /cost is available only inside an active Scout conversation", file=sys.stderr)
-        return 2
     report = build_cost_report(config["source_database"], session_id, config["timezone"])
     print(format_cost_report(report, period, config["usd_per_credit_by_model"], config.get("usd_to_nok")))
     return 0
