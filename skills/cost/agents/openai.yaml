@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scout Cost"
+  short_description: "Show local Scout credits for answer, thread, and day"
+  default_prompt: "Use $cost to show my local Scout credits for the last completed answer, this thread, and today."

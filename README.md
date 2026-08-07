@@ -57,6 +57,7 @@ If any requirement fails, diagnose it safely and explain the smallest corrective
 - Independent verification using `token_details_json`.
 - A private SQLite history with incremental, duplicate-safe imports.
 - A responsive light/dark dashboard with no external assets or network requests.
+- An optional local Scout `/cost` skill for the last completed answer, current thread, and today.
 - Optional anonymized chat reporting, plan context, billing estimates, and explicit aggregate GitHub billing snapshots — all disabled or empty by default.
 
 <p align="center">
@@ -91,6 +92,26 @@ git pull --ff-only
 ./install.sh update
 ${HOME}/.local/bin/scout-usage update
 ```
+
+## Optional `/cost` command inside Scout
+
+Install the local Scout skill only when you want it:
+
+```sh
+./install.sh update --install-scout-skill
+```
+
+Then start a new Scout conversation if Scout has not refreshed its skill list and enter:
+
+```text
+/cost
+```
+
+It reports three local Scout-only slices: the last completed answer, the completed part of the current conversation, and all local Scout chats today. The report is measured **before the `/cost` request**, so the usage of the `/cost` answer itself appears next time. One answer may contain several model/tool calls.
+
+The command reads `~/.scout/copilot/session-store.db` in SQLite read-only mode, uses Scout's active conversation identifier only as a query parameter, and never prints or stores that identifier, prompts, responses, database paths, or raw token details. It makes no network requests. The installer uses Scout's current `~/.scout/m-skills/cost` location when available, with `~/.copilot/m-skills/cost` as the portable fallback, and refuses to overwrite an unowned skill.
+
+Credits are calculated exactly from nano-AIU, then displayed as approximate rounded whole credits (`≈`) to keep the response readable. `AIU data: pass` means stored AIU matched independent token-detail recalculation for the included events; it does not verify GitHub billing. For transition-safe daily boundaries, `/cost` requires `timezone` to resolve to an IANA zone such as `Europe/Oslo`.
 
 ## Understanding the numbers
 
@@ -204,6 +225,8 @@ Install the optional Codex skill separately:
 ```sh
 ./install.sh install --install-skill
 ```
+
+The Codex management skill and Scout `/cost` skill are separate opt-ins. Neither creates a background job.
 
 ## Troubleshooting
 

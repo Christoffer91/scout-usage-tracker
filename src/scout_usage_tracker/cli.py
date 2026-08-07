@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import ConfigError, ensure_secret, load_config
+from .cost_report import CostReportError, build_cost_report, format_cost_report
 from .import_usage import import_usage
 from .render import render_dashboard
 from .source import read_source
@@ -60,6 +61,16 @@ def command_status(config: dict) -> int:
     return 0 if source.status == "ok" else 2
 
 
+def command_cost(config: dict) -> int:
+    session_id = os.environ.get("SESSION_ID", "")
+    if not session_id:
+        print("FAIL: /cost is available only inside an active Scout conversation", file=sys.stderr)
+        return 2
+    report = build_cost_report(config["source_database"], session_id, config["timezone"])
+    print(format_cost_report(report))
+    return 0
+
+
 def command_open(config: dict) -> int:
     target = Path(config["dashboard_path"])
     if not target.is_file():
@@ -97,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scout-usage")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="JSON configuration path")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("update", "refresh", "render", "status", "open"):
+    for name in ("update", "refresh", "render", "status", "open", "cost"):
         command = commands.add_parser(name)
         command.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
     current = datetime.now(timezone.utc)
@@ -120,9 +131,11 @@ def main(argv: list[str] | None = None) -> int:
             return command_render(config)
         if args.command == "status":
             return command_status(config)
+        if args.command == "cost":
+            return command_cost(config)
         if args.command == "github-sync":
             return command_github_sync(config, args.scope, args.owner, args.year, args.month)
         return command_open(config)
-    except (ConfigError, ValueError, OSError) as exc:
+    except (ConfigError, CostReportError, ValueError, OSError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 2

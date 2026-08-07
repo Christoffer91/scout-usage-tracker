@@ -6,21 +6,27 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from scout_usage_tracker.cli import build_parser, command_github_sync, main
+from scout_usage_tracker.cli import build_parser, command_cost, command_github_sync, main
 from tests.helpers import event, make_source
 
 
 class CliBillingTests(unittest.TestCase):
+    def test_cost_fails_closed_without_active_scout_session(self):
+        error = StringIO()
+        with patch.dict("os.environ", {}, clear=True), redirect_stderr(error):
+            self.assertEqual(command_cost({"source_database": "/not/read", "timezone": "UTC"}), 2)
+        self.assertIn("only inside an active Scout conversation", error.getvalue())
+
     def test_github_sync_arguments_are_command_specific(self):
         args = build_parser().parse_args(["github-sync", "--scope", "organization", "--owner", "fictional-org", "--year", "2026", "--month", "8"])
         self.assertEqual((args.command, args.scope, args.owner, args.year, args.month), ("github-sync", "organization", "fictional-org", 2026, 8))
-        for ordinary in ("update", "render", "status", "open"):
+        for ordinary in ("update", "render", "status", "open", "cost"):
             args = build_parser().parse_args([ordinary])
             self.assertFalse(hasattr(args, "owner"))
 
     def test_config_path_is_accepted_before_or_after_every_subcommand(self):
         config_path = "/tmp/fictional-scout-config.json"
-        legacy = ("update", "refresh", "render", "status", "open")
+        legacy = ("update", "refresh", "render", "status", "open", "cost")
         for command in legacy:
             with self.subTest(command=command, position="before"):
                 args = build_parser().parse_args(["--config", config_path, command])
