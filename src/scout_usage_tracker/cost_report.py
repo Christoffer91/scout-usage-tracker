@@ -414,7 +414,9 @@ def format_cost_report(
         if safe_link:
             lines.append(f"Check {safe_link} for details and history.")
         lines.extend(["", "Want to learn more ways to use `/cost`? Type “`/cost FAQ`”."])
-    return "\n".join(lines)
+    # Scout surfaces do not consistently preserve Markdown soft line breaks.
+    # Emit explicit hard breaks so metrics and per-model estimates remain one item per line.
+    return "\n".join(f"{line}  " if line else "" for line in lines)
 
 
 def format_cost_faq(language: str = "en") -> str:
