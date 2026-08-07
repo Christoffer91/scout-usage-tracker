@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible problem without sharing private Scout data
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Never attach `session-store.db`, a private dashboard, prompts, raw session IDs, account totals, or personal paths.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+      placeholder: The tracker reports ...; I expected ...
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Desktop platform
+      options:
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: tracker-version
+    attributes:
+      label: Tracker version or commit
+      placeholder: v0.2.7 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Use synthetic or redacted values only.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Safe diagnostics
+      description: Share only sanitized status/error text. Do not include database contents, prompts, IDs, tokens, private paths, or account values.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed private usage data, prompts, session identifiers, credentials, databases, and personal paths.
+          required: true

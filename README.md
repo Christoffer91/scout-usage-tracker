@@ -225,6 +225,8 @@ Missing/invalid JSON and mismatches are reported explicitly. `total_nano_aiu` re
 
 The implementation uses only Python's standard library. Preserve the local-only architecture: no telemetry, external dashboard assets, implicit jobs, raw identifiers, or writes to Scout's database.
 
+Contributions are welcome through [issues](https://github.com/Christoffer91/scout-usage-tracker/issues) and pull requests. Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting; report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
+
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py' -v
 python3 -m compileall -q src scripts tests

@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a privacy-safe improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user need or limitation should this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful outcome, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and local-data impact
+      description: Explain any new data, network, identifier, permission, background-job, or sharing behavior. Write "None" when not applicable.
+    validations:
+      required: true
+  - type: checkboxes
+    id: defaults
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: This request does not require sharing a real Scout database or private usage data.
+          required: true
+        - label: Any new sensitive or networked behavior can remain explicit opt-in.
+          required: true

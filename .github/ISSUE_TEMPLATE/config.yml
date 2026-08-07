@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security or privacy vulnerability
+    url: https://github.com/Christoffer91/scout-usage-tracker/security/policy
+    about: Do not disclose vulnerabilities or private data in a public issue.
