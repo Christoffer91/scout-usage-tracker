@@ -508,6 +508,16 @@
   });
 
   const dashboard = document.querySelector('.dashboard');
+  let stableDashboardHeight = 0;
+  const reserveDashboardHeight = () => {
+    stableDashboardHeight = Math.max(stableDashboardHeight, dashboard.scrollHeight);
+    dashboard.style.minHeight = `${stableDashboardHeight}px`;
+  };
+  window.addEventListener('resize', () => {
+    dashboard.style.removeProperty('min-height');
+    stableDashboardHeight = 0;
+    reserveDashboardHeight();
+  });
   let filterData = { models: [], money: { mode: 'none' } };
   try { filterData = JSON.parse(dashboard.dataset.filterData || '{}'); } catch (_) {}
   const models = Array.isArray(filterData.models) ? filterData.models : [];
@@ -895,6 +905,7 @@
     container.querySelector('[data-money-note]').textContent = `${nok}${mode === 'credit' ? 'AI-credit estimate, not a bill' : 'estimate, not a bill'}`;
   };
   function updateAll() {
+    reserveDashboardHeight();
     const view = combined();
     document.querySelector('[data-total-credits]').textContent = whole.format(credits(view.total));
     document.querySelector('[data-total-calls]').textContent = compact(view.total.calls);

@@ -403,7 +403,7 @@ def format_cost_report(
             lines.append(f"Uten pris: **{_money(credits, language)} credits** fra {names}.")
         else:
             lines.append(f"Unpriced: **{_money(credits, language)} credits** from {names}.")
-    safe_link = None if not dashboard_uri else f'<a href="{escape(dashboard_uri, quote=True)}">{escape(dashboard_uri)}</a>'
+    safe_link = None if not dashboard_uri else f'<a href="{escape(dashboard_uri, quote=True)}">Usage tracker</a>'
     if language == "nb":
         lines.extend(["", "Dette er Scout-only og inkluderer ikke GitHub Copilot-appen eller andre Copilot-klienter."])
         if safe_link:

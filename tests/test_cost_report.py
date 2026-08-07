@@ -143,7 +143,8 @@ class CostReportTests(unittest.TestCase):
             report = build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
             uri = "file:///tmp/Scout%20Usage/dashboard.html"
             output = format_cost_report(report, language="nb", dashboard_uri=uri)
-            self.assertIn(f'<a href="{uri}">{uri}</a>', output)
+            self.assertIn(f'<a href="{uri}">Usage tracker</a>', output)
+            self.assertNotIn(f'>{uri}</a>', output)
             self.assertIn("Sjekk", output)
             self.assertNotIn("Slik bruker du `/cost`", output)
             self.assertNotIn("AIU-kontroll", output)
