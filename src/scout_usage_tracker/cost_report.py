@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from .aggregate import local_zone
-from .pricing import credits_from_nano, verification
+from .pricing import credits_from_nano, estimate_costs, verification
 
 
 class CostReportError(RuntimeError):
@@ -20,9 +20,27 @@ class CostReportError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ModelUsage:
+    model: str
+    total_nano_aiu: int
+    model_calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+
+    @property
+    def credits(self) -> Decimal:
+        return credits_from_nano(self.total_nano_aiu)
+
+
+@dataclass(frozen=True)
 class UsageSlice:
     total_nano_aiu: int
-    tool_calls: int
+    model_calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    models: tuple[ModelUsage, ...]
 
     @property
     def credits(self) -> Decimal:
@@ -34,26 +52,53 @@ class CostReport:
     last_answer: UsageSlice
     thread: UsageSlice
     today: UsageSlice
+    week: UsageSlice
+    month: UsageSlice
     integrity: str
     checked_events: int
 
 
 _REQUIRED_USAGE_COLUMNS = {
-    "id", "session_id", "turn_index", "total_nano_aiu", "token_details_json", "created_at",
+    "id", "session_id", "turn_index", "model", "input_tokens", "output_tokens",
+    "cache_read_tokens", "total_nano_aiu", "token_details_json", "created_at",
 }
-_REQUIRED_TURN_COLUMNS = {"session_id", "turn_index", "assistant_response"}
+_PERIODS = {"last", "thread", "day", "week", "month"}
 
 
 def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
     return {str(row[1]) for row in connection.execute(f'PRAGMA table_info("{table}")')}
 
 
+def _value(row: sqlite3.Row, name: str) -> int:
+    return int(row[name] or 0)
+
+
 def _rows_to_slice(rows: list[sqlite3.Row]) -> UsageSlice:
-    return UsageSlice(sum(int(row["total_nano_aiu"]) for row in rows), len(rows))
+    grouped: dict[str, dict[str, int]] = {}
+    for row in rows:
+        model = str(row["model"])
+        values = grouped.setdefault(model, {"nano": 0, "calls": 0, "input": 0, "output": 0, "cache": 0})
+        values["nano"] += _value(row, "total_nano_aiu")
+        values["calls"] += 1
+        values["input"] += _value(row, "input_tokens")
+        values["output"] += _value(row, "output_tokens")
+        values["cache"] += _value(row, "cache_read_tokens")
+    models = tuple(
+        ModelUsage(model, values["nano"], values["calls"], values["input"], values["output"], values["cache"])
+        for model, values in sorted(grouped.items(), key=lambda item: (-item[1]["nano"], item[0]))
+    )
+    return UsageSlice(
+        sum(item.total_nano_aiu for item in models),
+        sum(item.model_calls for item in models),
+        sum(item.input_tokens for item in models),
+        sum(item.output_tokens for item in models),
+        sum(item.cache_read_tokens for item in models),
+        models,
+    )
 
 
 def _integrity(rows: list[sqlite3.Row]) -> tuple[str, int]:
-    states = [verification(int(row["total_nano_aiu"]), row["token_details_json"])[0] for row in rows]
+    states = [verification(_value(row, "total_nano_aiu"), row["token_details_json"])[0] for row in rows]
     if "mismatch" in states:
         return "failed", len(states)
     if any(state != "verified" for state in states):
@@ -65,6 +110,18 @@ def _utc_text(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _bounds(day: date, zone: ZoneInfo) -> dict[str, tuple[datetime, datetime]]:
+    day_start = datetime.combine(day, time.min, zone)
+    week_start = day_start - timedelta(days=day.weekday())
+    month_start = datetime(day.year, day.month, 1, tzinfo=zone)
+    next_month = datetime(day.year + (day.month == 12), 1 if day.month == 12 else day.month + 1, 1, tzinfo=zone)
+    return {
+        "day": (day_start, day_start + timedelta(days=1)),
+        "week": (week_start, week_start + timedelta(days=7)),
+        "month": (month_start, next_month),
+    }
+
+
 def build_cost_report(
     source_database: str,
     session_id: str,
@@ -73,10 +130,7 @@ def build_cost_report(
     now: datetime | None = None,
     _after_snapshot: Callable[[], None] | None = None,
 ) -> CostReport:
-    """Read three exact nano-AIU slices from one consistent SQLite snapshot.
-
-    The private callback is solely a deterministic concurrency-test barrier.
-    """
+    """Read exact nano-AIU slices from one consistent SQLite snapshot."""
     if not session_id.strip():
         raise CostReportError("no active Scout conversation was identified")
     source = Path(source_database).expanduser()
@@ -87,9 +141,7 @@ def build_cost_report(
     if not isinstance(zone, ZoneInfo):
         raise CostReportError("configure an IANA timezone (for example Europe/Oslo) before using /cost")
     current = now or datetime.now(timezone.utc)
-    local_date = current.astimezone(zone).date()
-    start_local = datetime.combine(local_date, time.min, zone)
-    end_local = datetime.combine(local_date + timedelta(days=1), time.min, zone)
+    period_bounds = _bounds(current.astimezone(zone).date(), zone)
 
     uri = "file:" + quote(str(source.resolve()), safe="/") + "?mode=ro"
     try:
@@ -98,44 +150,58 @@ def build_cost_report(
         connection.execute("PRAGMA query_only=ON")
         if not _REQUIRED_USAGE_COLUMNS.issubset(_columns(connection, "assistant_usage_events")):
             raise CostReportError("Scout usage database has an unsupported assistant_usage_events schema")
-        if not _REQUIRED_TURN_COLUMNS.issubset(_columns(connection, "turns")):
-            raise CostReportError("Scout usage database has an unsupported turns schema")
 
         connection.execute("BEGIN")
-        # This SELECT is deliberately the first read after BEGIN: it establishes
-        # the SQLite snapshot before any concurrent Scout writer can affect it.
-        completed = connection.execute(
-            "SELECT MAX(turn_index) FROM turns WHERE session_id = ? AND assistant_response IS NOT NULL",
+        # The model call that invokes /cost is already the highest usage turn.
+        # This first read fixes the SQLite snapshot and lets us exclude that turn
+        # without relying on assistant_response, which unattended Scout surfaces
+        # may leave NULL even after a completed run.
+        active_turn = connection.execute(
+            "SELECT MAX(turn_index) FROM assistant_usage_events WHERE session_id = ?",
             (session_id,),
         ).fetchone()[0]
         if _after_snapshot is not None:
             _after_snapshot()
-        if completed is None:
-            raise CostReportError("the active Scout conversation has no completed answer yet")
+        if active_turn is None:
+            raise CostReportError("no Scout usage events were found for the active conversation")
+        completed_boundary = int(active_turn) - 1
 
-        columns = "id, total_nano_aiu, token_details_json"
-        last_rows = connection.execute(
+        columns = (
+            "id, model, input_tokens, output_tokens, cache_read_tokens, "
+            "total_nano_aiu, token_details_json"
+        )
+        last_turn = connection.execute(
+            "SELECT MAX(turn_index) FROM assistant_usage_events WHERE session_id = ? AND turn_index <= ?",
+            (session_id, completed_boundary),
+        ).fetchone()[0]
+        last_rows = [] if last_turn is None else connection.execute(
             f"SELECT {columns} FROM assistant_usage_events WHERE session_id = ? AND turn_index = ?",
-            (session_id, completed),
+            (session_id, last_turn),
         ).fetchall()
         thread_rows = connection.execute(
             f"SELECT {columns} FROM assistant_usage_events WHERE session_id = ? AND turn_index <= ?",
-            (session_id, completed),
-        ).fetchall()
-        today_rows = connection.execute(
-            f"""SELECT {columns} FROM assistant_usage_events
-                WHERE julianday(created_at) >= julianday(?) AND julianday(created_at) < julianday(?)
-                  AND (session_id <> ? OR turn_index <= ?)""",
-            (_utc_text(start_local), _utc_text(end_local), session_id, completed),
+            (session_id, completed_boundary),
         ).fetchall()
 
-        unique = {str(row["id"]): row for rows in (last_rows, thread_rows, today_rows) for row in rows}
+        period_rows: dict[str, list[sqlite3.Row]] = {}
+        for name, (start, end) in period_bounds.items():
+            period_rows[name] = connection.execute(
+                f"""SELECT {columns} FROM assistant_usage_events
+                    WHERE julianday(created_at) >= julianday(?) AND julianday(created_at) < julianday(?)
+                      AND (session_id <> ? OR turn_index <= ?)""",
+                (_utc_text(start), _utc_text(end), session_id, completed_boundary),
+            ).fetchall()
+
+        all_groups = (last_rows, thread_rows, *period_rows.values())
+        unique = {str(row["id"]): row for rows in all_groups for row in rows}
         integrity, checked = _integrity(list(unique.values()))
         connection.execute("COMMIT")
         return CostReport(
             last_answer=_rows_to_slice(last_rows),
             thread=_rows_to_slice(thread_rows),
-            today=_rows_to_slice(today_rows),
+            today=_rows_to_slice(period_rows["day"]),
+            week=_rows_to_slice(period_rows["week"]),
+            month=_rows_to_slice(period_rows["month"]),
             integrity=integrity,
             checked_events=checked,
         )
@@ -148,17 +214,88 @@ def build_cost_report(
             connection.close()
 
 
-def _whole(credits: Decimal) -> str:
-    return f"{credits.quantize(Decimal('1'), rounding=ROUND_HALF_UP):,}"
+def _whole(value: Decimal) -> str:
+    return f"{value.quantize(Decimal('1'), rounding=ROUND_HALF_UP):,}".replace(",", " ")
 
 
-def format_cost_report(report: CostReport) -> str:
+def _integer(value: int) -> str:
+    return f"{value:,}".replace(",", " ")
+
+
+def _tokens(value: int) -> str:
+    if value >= 1_000_000:
+        millions = Decimal(value) / Decimal(1_000_000)
+        return f"{millions.quantize(Decimal('1'), rounding=ROUND_HALF_UP)}M"
+    return _integer(value)
+
+
+def _money(value: Decimal, places: str = "0.01") -> str:
+    rendered = f"{value.quantize(Decimal(places), rounding=ROUND_HALF_UP):,}"
+    return rendered.replace(",", "X").replace(".", ",").replace("X", " ")
+
+
+def _model_name(model: str) -> str:
+    if model.startswith("gpt-"):
+        parts = model.split("-")
+        return "GPT-" + parts[1] + (" " + " ".join(part.title() for part in parts[2:]) if len(parts) > 2 else "")
+    if model.startswith("mai-code"):
+        return "mai-code"
+    return model
+
+
+def _selected(report: CostReport, period: str) -> tuple[str, UsageSlice]:
+    if period not in _PERIODS:
+        raise ValueError(f"unsupported cost period: {period}")
+    return {
+        "last": ("Siste fullførte svar", report.last_answer),
+        "thread": ("Denne chatten hittil", report.thread),
+        "day": ("I dag", report.today),
+        "week": ("Denne ISO-uken", report.week),
+        "month": ("Denne måneden", report.month),
+    }[period]
+
+
+def format_cost_report(
+    report: CostReport,
+    period: str = "thread",
+    rates: dict[str, Any] | None = None,
+    usd_to_nok: Any = None,
+) -> str:
+    title, usage = _selected(report, period)
     lines = [
-        "Scout credits before this /cost request",
-        f"Last completed answer: ≈{_whole(report.last_answer.credits)} credits · {report.last_answer.tool_calls:,} tool calls",
-        f"Completed thread: ≈{_whole(report.thread.credits)} credits · {report.thread.tool_calls:,} tool calls",
-        f"Today (all local Scout chats): ≈{_whole(report.today.credits)} credits · {report.today.tool_calls:,} tool calls",
-        f"AIU data: {report.integrity} ({report.checked_events:,} events checked)",
-        "Displayed credits are rounded to whole numbers; the underlying nano-AIU calculation is exact.",
+        f"{title}:",
+        "",
+        f"**{_integer(usage.model_calls)} modellkall**",
+        f"**{_whole(usage.credits)} Scout-credits** · eksakt beregnet fra nano-AIU, avrundet visning",
+        f"Input: **{_tokens(usage.input_tokens)} tokens**",
+        f"Output: **{_tokens(usage.output_tokens)} tokens**",
+        f"Cache-read: **{_tokens(usage.cache_read_tokens)} tokens**",
     ]
+
+    pricing = estimate_costs({item.model: item.credits for item in usage.models}, rates or {}, usd_to_nok)
+    priced = [(item, pricing["per_model_usd"][item.model]) for item in usage.models
+              if pricing["per_model_usd"].get(item.model) is not None]
+    unpriced = [item for item in usage.models if pricing["per_model_usd"].get(item.model) is None]
+    lines.extend(["", "Kostnadsestimat:"])
+    if priced:
+        exchange = Decimal(str(usd_to_nok)) if usd_to_nok is not None else None
+        for item, usd in priced:
+            cost = f"ca. **{_money(usd)} USD"
+            if exchange is not None:
+                cost += f" / {_money(usd * exchange, '1')} NOK"
+            lines.append(f"{_model_name(item.model)}-delen: {cost}**")
+    else:
+        lines.append("**—** Ingen modellpris er konfigurert for denne perioden.")
+    if unpriced:
+        credits = sum((item.credits for item in unpriced), Decimal(0))
+        names = ", ".join(dict.fromkeys(_model_name(item.model) for item in unpriced))
+        lines.append(f"I tillegg: **{_money(credits)} credits** fra {names} uten konfigurert prisrate.")
+    lines.extend([
+        "Estimatet er ikke en faktura; inkluderte credits kan gjøre faktisk belastning lavere eller null.",
+        "",
+        "Dette er Scout-only og inkluderer ikke GitHub Copilot-appen eller andre Copilot-klienter.",
+        f"AIU-kontroll: **{report.integrity}** ({_integer(report.checked_events)} events kontrollert).",
+        "",
+        "Vil du se bruken i dag, hele uken, hele måneden eller kun siste fullførte svar?",
+    ])
     return "\n".join(lines)

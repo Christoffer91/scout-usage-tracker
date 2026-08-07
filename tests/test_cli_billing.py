@@ -24,6 +24,10 @@ class CliBillingTests(unittest.TestCase):
             args = build_parser().parse_args([ordinary])
             self.assertFalse(hasattr(args, "owner"))
 
+    def test_cost_period_is_command_specific(self):
+        self.assertEqual(build_parser().parse_args(["cost"]).period, "thread")
+        self.assertEqual(build_parser().parse_args(["cost", "--period", "month"]).period, "month")
+
     def test_config_path_is_accepted_before_or_after_every_subcommand(self):
         config_path = "/tmp/fictional-scout-config.json"
         legacy = ("update", "refresh", "render", "status", "open", "cost")

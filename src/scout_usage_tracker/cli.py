@@ -61,13 +61,13 @@ def command_status(config: dict) -> int:
     return 0 if source.status == "ok" else 2
 
 
-def command_cost(config: dict) -> int:
+def command_cost(config: dict, period: str = "thread") -> int:
     session_id = os.environ.get("SESSION_ID", "")
     if not session_id:
         print("FAIL: /cost is available only inside an active Scout conversation", file=sys.stderr)
         return 2
     report = build_cost_report(config["source_database"], session_id, config["timezone"])
-    print(format_cost_report(report))
+    print(format_cost_report(report, period, config["usd_per_credit_by_model"], config.get("usd_to_nok")))
     return 0
 
 
@@ -108,9 +108,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scout-usage")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="JSON configuration path")
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("update", "refresh", "render", "status", "open", "cost"):
+    for name in ("update", "refresh", "render", "status", "open"):
         command = commands.add_parser(name)
         command.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
+    cost = commands.add_parser("cost", help="show local Scout usage before the current /cost turn")
+    cost.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
+    cost.add_argument("--period", choices=("thread", "last", "day", "week", "month"), default="thread")
     current = datetime.now(timezone.utc)
     sync = commands.add_parser("github-sync", help="explicitly fetch aggregate GitHub billing usage through gh")
     sync.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
@@ -132,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             return command_status(config)
         if args.command == "cost":
-            return command_cost(config)
+            return command_cost(config, args.period)
         if args.command == "github-sync":
             return command_github_sync(config, args.scope, args.owner, args.year, args.month)
         return command_open(config)

@@ -12,17 +12,17 @@ PLIST="$LAUNCH_DIR/$LABEL.plist"
 SKILL_DIR="$HOME/.codex/skills/scout-usage"
 if [ -n "${SCOUT_COST_SKILL_DIR:-}" ]; then
   SCOUT_SKILL_DIR=$SCOUT_COST_SKILL_DIR
-elif [ -d "$HOME/.scout" ]; then
-  SCOUT_SKILL_DIR="$HOME/.scout/m-skills/cost"
 else
-  SCOUT_SKILL_DIR="$HOME/.copilot/m-skills/cost"
+  SCOUT_SKILL_DIR="$HOME/.scout/m-skills/cost"
 fi
+COPILOT_SKILL_DIR=${COPILOT_COST_SKILL_DIR:-"$HOME/.copilot/m-skills/cost"}
 OWNER_MARKER=".scout-usage-tracker-owned"
 INSTALL_MARKER="$INSTALL_ROOT/$OWNER_MARKER"
 CONFIG_MARKER="$CONFIG_DIR/$OWNER_MARKER"
 BIN_MARKER="$BIN_DIR/.scout-usage-owned"
 SKILL_MARKER="$SKILL_DIR/$OWNER_MARKER"
 SCOUT_SKILL_MARKER="$SCOUT_SKILL_DIR/$OWNER_MARKER"
+COPILOT_SKILL_MARKER="$COPILOT_SKILL_DIR/$OWNER_MARKER"
 LAUNCH_MARKER="$INSTALL_ROOT/.launchagent-installed"
 
 usage() {
@@ -82,7 +82,7 @@ if not home_raw.is_absolute() or home_raw == pathlib.Path("/"):
     raise SystemExit("Unsafe HOME: expected an absolute, non-root directory")
 home = home_raw.resolve()
 resolved = []
-for raw in sys.argv[2:8]:
+for raw in sys.argv[2:9]:
     candidate_raw = pathlib.Path(raw)
     if not candidate_raw.is_absolute():
         raise SystemExit("Unsafe install path: expected an absolute path strictly under HOME")
@@ -90,17 +90,17 @@ for raw in sys.argv[2:8]:
     if candidate == home or home not in candidate.parents:
         raise SystemExit("Unsafe install path: all managed paths must resolve strictly under HOME")
     resolved.append(candidate)
-if resolved[0].name != "scout-usage-tracker" or resolved[2].name != "scout-usage-tracker" or resolved[5].name != "cost":
+if resolved[0].name != "scout-usage-tracker" or resolved[2].name != "scout-usage-tracker" or resolved[5].name != "cost" or resolved[6].name != "cost":
     raise SystemExit("Unsafe tracker root: install and config directories must be named scout-usage-tracker")
 for index, left in enumerate(resolved):
     for right in resolved[index + 1:]:
         if left == right or left in right.parents or right in left.parents:
             raise SystemExit("Unsafe install path: managed paths must be pairwise disjoint")
-project = pathlib.Path(sys.argv[8]).resolve()
+project = pathlib.Path(sys.argv[9]).resolve()
 for candidate in resolved:
     if candidate == project or candidate in project.parents or project in candidate.parents:
         raise SystemExit("Unsafe install path: managed paths must not overlap the source package")
-' "$HOME" "$INSTALL_ROOT" "$BIN_DIR" "$CONFIG_DIR" "$LAUNCH_DIR" "$SKILL_DIR" "$SCOUT_SKILL_DIR" "$PROJECT_DIR"
+' "$HOME" "$INSTALL_ROOT" "$BIN_DIR" "$CONFIG_DIR" "$LAUNCH_DIR" "$SKILL_DIR" "$SCOUT_SKILL_DIR" "$COPILOT_SKILL_DIR" "$PROJECT_DIR"
 }
 
 require_owned_or_absent() {
@@ -125,6 +125,7 @@ validate_ownership() {
     fi
     if [ "$install_scout_skill_flag" = true ]; then
       require_owned_or_absent "$SCOUT_SKILL_DIR" "$SCOUT_SKILL_MARKER"
+      require_owned_or_absent "$COPILOT_SKILL_DIR" "$COPILOT_SKILL_MARKER"
     fi
     if [ "$enable_auto" = true ] && [ -e "$PLIST" ] && [ ! -f "$LAUNCH_MARKER" ]; then
       echo "Refusing to overwrite unowned LaunchAgent: $PLIST" >&2
@@ -210,15 +211,23 @@ install_skill() {
   echo "Installed Codex skill at $SKILL_DIR"
 }
 
-install_scout_skill() {
-  mkdir -p "$(dirname "$SCOUT_SKILL_DIR")"
-  if [ -d "$SCOUT_SKILL_DIR" ]; then
-    rm -rf "$SCOUT_SKILL_DIR"
+install_runtime_skill() {
+  runtime_skill_dir=$1
+  runtime_skill_marker=$2
+  runtime_label=$3
+  mkdir -p "$(dirname "$runtime_skill_dir")"
+  if [ -d "$runtime_skill_dir" ]; then
+    rm -rf "$runtime_skill_dir"
   fi
-  cp -R "$PROJECT_DIR/skills/cost" "$SCOUT_SKILL_DIR"
-  : > "$SCOUT_SKILL_MARKER"
-  chmod 600 "$SCOUT_SKILL_MARKER"
-  echo "Installed Scout /cost skill at $SCOUT_SKILL_DIR"
+  cp -R "$PROJECT_DIR/skills/cost" "$runtime_skill_dir"
+  : > "$runtime_skill_marker"
+  chmod 600 "$runtime_skill_marker"
+  echo "Installed $runtime_label /cost skill at $runtime_skill_dir"
+}
+
+install_scout_skill() {
+  install_runtime_skill "$SCOUT_SKILL_DIR" "$SCOUT_SKILL_MARKER" "Scout"
+  install_runtime_skill "$COPILOT_SKILL_DIR" "$COPILOT_SKILL_MARKER" "Copilot-compatible"
 }
 
 do_uninstall() {
@@ -236,6 +245,9 @@ do_uninstall() {
   fi
   if [ -f "$SCOUT_SKILL_MARKER" ]; then
     rm -rf "$SCOUT_SKILL_DIR"
+  fi
+  if [ -f "$COPILOT_SKILL_MARKER" ]; then
+    rm -rf "$COPILOT_SKILL_DIR"
   fi
   if [ -f "$INSTALL_MARKER" ]; then
     rm -rf "$INSTALL_ROOT/src" "$INSTALL_ROOT/templates" "$INSTALL_ROOT/skills"

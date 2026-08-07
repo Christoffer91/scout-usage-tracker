@@ -21,6 +21,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertEqual(config.stat().st_mode & 0o777, 0o600)
             self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
             self.assertFalse((home / "Library/LaunchAgents/local.scout-usage-tracker.plist").exists())
+            self.assertFalse((home / ".scout/m-skills/cost").exists())
             self.assertFalse((home / ".copilot/m-skills/cost").exists())
             subprocess.run(["sh", str(ROOT / "install.sh"), "uninstall"], env=env, check=True, capture_output=True)
             self.assertTrue(config.exists())
@@ -99,6 +100,17 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertEqual(skill_file.read_text(), "unowned")
             self.assertFalse((home / ".local").exists())
 
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            skill = home / ".copilot/m-skills/cost"
+            skill.mkdir(parents=True)
+            skill_file = skill / "SKILL.md"; skill_file.write_text("unowned", encoding="utf-8")
+            completed = subprocess.run(["sh", str(ROOT / "install.sh"), "install", "--install-scout-skill"],
+                                       env={**os.environ, "HOME": str(home)}, text=True, capture_output=True)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertEqual(skill_file.read_text(), "unowned")
+            self.assertFalse((home / ".local").exists())
+
     def test_scout_cost_skill_is_explicit_owned_and_uninstalled(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
@@ -107,11 +119,15 @@ class LifecyclePrivacyTests(unittest.TestCase):
             completed = subprocess.run(["sh", str(ROOT / "install.sh"), "install", "--install-scout-skill"],
                                        env=env, check=True, text=True, capture_output=True)
             skill = home / ".scout/m-skills/cost"
+            portable = home / ".copilot/m-skills/cost"
             self.assertIn("Installed Scout /cost skill", completed.stdout)
-            self.assertIn("name: cost", (skill / "SKILL.md").read_text(encoding="utf-8"))
-            self.assertTrue((skill / ".scout-usage-tracker-owned").is_file())
+            self.assertIn("Installed Copilot-compatible /cost skill", completed.stdout)
+            for target in (skill, portable):
+                self.assertIn("name: cost", (target / "SKILL.md").read_text(encoding="utf-8"))
+                self.assertTrue((target / ".scout-usage-tracker-owned").is_file())
             subprocess.run(["sh", str(ROOT / "install.sh"), "uninstall"], env=env, check=True, capture_output=True)
             self.assertFalse(skill.exists())
+            self.assertFalse(portable.exists())
 
     def test_purge_removes_only_enumerated_owned_files(self):
         with tempfile.TemporaryDirectory() as temporary:
