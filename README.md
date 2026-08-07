@@ -57,7 +57,7 @@ If any requirement fails, diagnose it safely and explain the smallest corrective
 - Independent verification using `token_details_json`.
 - A private SQLite history with incremental, duplicate-safe imports.
 - A responsive light/dark dashboard with no external assets or network requests.
-- An optional local Scout `/cost` skill for the last completed answer, current thread, and today.
+- An optional multilingual Scout `/cost` skill for the current chat by default, with explicit all-chat totals.
 - Optional anonymized chat reporting, plan context, billing estimates, and explicit aggregate GitHub billing snapshots — all disabled or empty by default.
 
 <p align="center">
@@ -107,22 +107,27 @@ Then start a new Scout conversation if Scout has not refreshed its skill list an
 /cost
 ```
 
-The default report shows the current chat so far: model calls, Scout credits, input/output/cache-read tokens, configured per-model USD/NOK estimates, and a separate credit remainder for models without a configured rate. The report is measured **before the `/cost` request**, so the usage of the `/cost` answer itself appears next time. One answer may contain several model calls.
+The default report is in English and shows the current chat so far: model calls, Scout credits, input/output/cache-read tokens, and estimated gross USD/NOK value. It also includes a short FAQ. The report is measured **before the `/cost` request**, so the usage of the `/cost` answer itself appears next time. One answer may contain several model calls.
 
-Explicit follow-up periods are also available:
+The current chat remains the scope unless you explicitly request all chats:
 
-```sh
-${HOME}/.local/bin/scout-usage cost --period last
-${HOME}/.local/bin/scout-usage cost --period day
-${HOME}/.local/bin/scout-usage cost --period week
-${HOME}/.local/bin/scout-usage cost --period month
+```text
+/cost today                    # current chat today
+/cost this chat                # current chat across retained history
+/cost last answer              # last completed answer in this chat
+/cost all chats                # all locally retained Scout chats
+/cost all chats today          # all Scout chats today
+/cost all chats this week      # all Scout chats this ISO week
+/cost all chats this month     # all Scout chats this month
 ```
+
+Norwegian requests such as `/cost i dag` and `/cost alle chatter i dag` return Norwegian output. English is used when a bare command contains no language signal. The skill can translate fixed labels for other languages while preserving every number, unit, model name, scope, integrity state, and billing caveat.
 
 The command reads `~/.scout/copilot/session-store.db` in SQLite read-only mode, uses Scout's active conversation identifier only as a query parameter, and never prints or stores that identifier, prompts, responses, database paths, or raw token details. It makes no network requests. To support ordinary chats plus Copilot-backed calendar and automation surfaces, the explicit skill option installs the same owned skill in both `~/.scout/m-skills/cost` and `~/.copilot/m-skills/cost`; it refuses to overwrite either location when it is not tracker-owned.
 
 Some calendar and automation surfaces do not provide `SESSION_ID` to local tools. In that case, `/cost` fails closed unless exactly one local Scout session has the uniquely freshest usage event within 30 seconds. If another session is active within three seconds, it asks you to wait and retry instead of risking cross-chat attribution. An explicitly supplied session ID is never replaced by this fallback.
 
-Credits are calculated exactly from nano-AIU, then displayed as a rounded whole number to keep the response readable; the output states this distinction rather than calling the displayed integer exact. `AIU data: pass` means stored AIU matched independent token-detail recalculation for the included events; it does not verify GitHub billing. Cost estimates appear only for configured model rates and remain estimates, not bills. For transition-safe day/week/month boundaries, `/cost` requires `timezone` to resolve to an IANA zone such as `Europe/Oslo`.
+Credits are calculated exactly from nano-AIU, then displayed as a rounded whole number to keep the response readable; the output states this distinction rather than calling the displayed integer exact. `AIU data: pass` means stored AIU matched independent token-detail recalculation for the events in the selected report; it does not verify GitHub billing. For transition-safe day/week/month boundaries, `/cost` requires `timezone` to resolve to an IANA zone such as `Europe/Oslo`.
 
 ## Understanding the numbers
 
@@ -134,7 +139,26 @@ credits = Decimal(total_nano_aiu) / 1,000,000,000
 
 **GitHub Copilot Admin totals are account-wide.** They can include usage from Scout and other Copilot clients, so the tracker never treats them as Scout-only usage.
 
-**USD and NOK values are estimates, not bills.** The database does not necessarily contain the amount actually charged. Your billed amount may be zero when usage is covered by included credits. Unknown model prices display `—` instead of being guessed.
+**USD and NOK values are gross estimates, not bills.** GitHub defines one AI credit as USD 0.01. Scout's model-specific token pricing is already reflected in `total_nano_aiu`, so gross value is `credits × USD 0.01` for every model. Your billed amount may still be lower or zero when usage is covered by included credits.
+
+### GitHub Copilot token-price reference — verified 7 August 2026
+
+GitHub's [official Copilot model pricing table](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) lists these rates per one million tokens. They explain why models consume credits at different speeds; the tracker does not need to re-price events because Scout stores the resulting exact nano-AIU and the token-detail rates used for independent verification.
+
+| Model/tier | Input | Cached input | Cache write | Output |
+| --- | ---: | ---: | ---: | ---: |
+| GPT-5.4 mini | USD 0.75 | USD 0.075 | — | USD 4.50 |
+| GPT-5.5 default | USD 5.00 | USD 0.50 | — | USD 30.00 |
+| GPT-5.5 long context | USD 10.00 | USD 1.00 | — | USD 45.00 |
+| GPT-5.6 Luna default | USD 0.20 | USD 0.02 | USD 0.25 | USD 1.20 |
+| GPT-5.6 Luna long context | USD 0.40 | USD 0.04 | USD 0.50 | USD 1.80 |
+| GPT-5.6 Terra default | USD 2.00 | USD 0.20 | USD 2.50 | USD 12.00 |
+| GPT-5.6 Terra long context | USD 4.00 | USD 0.40 | USD 5.00 | USD 18.00 |
+| GPT-5.6 Sol default | USD 5.00 | USD 0.50 | USD 6.25 | USD 30.00 |
+| GPT-5.6 Sol long context | USD 10.00 | USD 1.00 | USD 12.50 | USD 45.00 |
+| MAI-Code-1-Flash | USD 0.75 | USD 0.075 | — | USD 4.50 |
+
+The local Scout rate metadata was compared against this table on 7 August 2026 and matched for GPT-5.4 mini, GPT-5.5, GPT-5.6 Luna, Terra and Sol, and MAI-Code-1-Flash. GitHub's table remains the authoritative current source; rates may change after that date.
 
 **Plan and billing context is separate from Scout accounting.** The dated catalog can show Free, Pro, Pro+, Max, Business, Enterprise, custom, or unknown context. Free and unknown allowances are never guessed. Business and Enterprise allowances are pooled at the billing entity and are never allocated to one user. Promotional allowances require an explicit eligibility selection or override.
 
@@ -182,8 +206,10 @@ The first install creates `~/.config/scout-usage-tracker/config.json` from [conf
 - `history_database`: the tracker's private retained history.
 - `dashboard_path`: where the standalone HTML report is written.
 - `timezone`: `local` or an IANA zone such as `Europe/Oslo`.
+- `language`: `en` by default; set `nb` for native Norwegian `/cost` output.
 - `privacy.include_sessions`: defaults to `false`; enables only anonymized chat labels and chat drill-downs.
-- `usd_per_credit_by_model`: optional model-specific USD-per-credit estimates.
+- `usd_per_credit`: defaults to GitHub's published `0.01` USD per AI credit.
+- `usd_per_credit_by_model`: optional compatibility override for a specific model; normally leave this empty.
 - `usd_to_nok`: optional manually supplied exchange rate.
 - `billing.enabled`: enables plan/billing context in the report; it does not enable network access.
 - `billing.plan`: `free`, `pro`, `pro_plus` (or `pro+`), `max`, `business`, `enterprise`, `custom`, or `unknown`.
@@ -193,7 +219,7 @@ The first install creates `~/.config/scout-usage-tracker/config.json` from [conf
 - `billing.snapshot_path`: private aggregate billing snapshot written only by the explicit sync command or supplied manually.
 - `account_comparison`: optional manual account-wide Copilot `total`, `additional_usage_usd`, `as_of`, and `scope`.
 
-Unknown models never receive a guessed cost. A total estimate appears only when every active model has a configured rate. Legacy camelCase keys are migrated safely when needed.
+Unknown future models still receive a gross estimate because Scout has already converted their token usage into exact credits. If `usd_per_credit` is explicitly removed or disabled in a custom integration, missing values display `—` rather than being guessed. Legacy camelCase keys are migrated safely when needed.
 
 </details>
 

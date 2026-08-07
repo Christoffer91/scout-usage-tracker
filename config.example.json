@@ -1,16 +1,15 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "source_database": "~/.scout/copilot/session-store.db",
   "history_database": "~/.local/share/scout-usage-tracker/history.sqlite3",
   "dashboard_path": "~/.local/share/scout-usage-tracker/dashboard.html",
   "timezone": "local",
+  "language": "en",
   "privacy": {
     "include_sessions": false
   },
-  "usd_per_credit_by_model": {
-    "example-small": "0.04",
-    "example-large": "0.12"
-  },
+  "usd_per_credit": "0.01",
+  "usd_per_credit_by_model": {},
   "usd_to_nok": null,
   "billing": {
     "enabled": false,

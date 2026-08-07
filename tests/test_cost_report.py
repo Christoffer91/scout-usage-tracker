@@ -53,10 +53,12 @@ class CostReportTests(unittest.TestCase):
             self.assertEqual((report.thread.total_nano_aiu, report.thread.model_calls), (2_600_000_000, 3))
             self.assertEqual(report.thread.input_tokens, 6_000)
             self.assertEqual([item.model for item in report.thread.models], ["gpt-5.6-sol", "gpt-5.6-luna"])
-            self.assertEqual((report.today.total_nano_aiu, report.today.model_calls), (5_000_000_000, 3))
-            self.assertEqual(report.week.total_nano_aiu, 5_600_000_000)
-            self.assertEqual(report.month.total_nano_aiu, 5_600_000_000)
-            self.assertEqual((report.integrity, report.checked_events), ("pass", 4))
+            self.assertEqual((report.chat_today.total_nano_aiu, report.chat_today.model_calls), (2_000_000_000, 2))
+            self.assertEqual((report.all_today.total_nano_aiu, report.all_today.model_calls), (5_000_000_000, 3))
+            self.assertEqual(report.chat_week.total_nano_aiu, 2_600_000_000)
+            self.assertEqual(report.all_week.total_nano_aiu, 5_600_000_000)
+            self.assertEqual(report.all_month.total_nano_aiu, 5_600_000_000)
+            self.assertEqual((report.thread.integrity, report.thread.checked_events), ("pass", 3))
             self.assertEqual(report.session_resolution, "environment")
 
     def test_missing_session_id_autodetects_only_unique_fresh_session(self):
@@ -89,9 +91,9 @@ class CostReportTests(unittest.TestCase):
             report = build_cost_report(source, "automation", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
             self.assertEqual(report.thread.model_calls, 0)
             self.assertEqual(report.last_answer.total_nano_aiu, 0)
-            self.assertEqual(report.today.total_nano_aiu, 0)
+            self.assertEqual(report.chat_today.total_nano_aiu, 0)
 
-    def test_norwegian_thread_output_partial_pricing_and_honest_rounding(self):
+    def test_norwegian_thread_output_complete_credit_pricing_and_honest_rounding(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "source.db"; create_source(source)
             add_event(source, "rated", "s", 1, 1_500_000_000, "2026-08-07T08:00:00Z",
@@ -99,15 +101,16 @@ class CostReportTests(unittest.TestCase):
             add_event(source, "unrated", "s", 1, 500_000_000, "2026-08-07T08:01:00Z", model="gpt-5.6-luna")
             add_event(source, "current-cost", "s", 2, 1, "2026-08-07T08:02:00Z")
             report = build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
-            output = format_cost_report(report, "thread", {"gpt-5.6-sol": "0.01"}, "10")
-            self.assertIn("Denne chatten hittil", output)
+            output = format_cost_report(report, "thread", {"gpt-5.6-sol": "0.01"}, "10", language="nb")
+            self.assertIn("Denne chatten hittil (kan omfatte flere dager)", output)
             self.assertIn("**2 modellkall**", output)
             self.assertIn("**2 Scout-credits** · eksakt beregnet fra nano-AIU, avrundet visning", output)
             self.assertIn("Input: **235M tokens**", output)
             self.assertIn("Output: **147 602 tokens**", output)
             self.assertIn("Cache-read: **228M tokens**", output)
-            self.assertIn("GPT-5.6 Sol-delen: ca. **0,02 USD / 0 NOK**", output)
-            self.assertIn("**0,50 credits** fra GPT-5.6 Luna", output)
+            self.assertIn("GPT-5.6 Sol-delen: ca. **USD 0,02 / NOK 0**", output)
+            self.assertIn("GPT-5.6 Luna-delen: ca. **USD 0,01 / NOK 0**", output)
+            self.assertNotIn("Uten pris", output)
             self.assertIn("ikke en faktura", output)
             self.assertIn("Scout-only", output)
 
@@ -117,19 +120,33 @@ class CostReportTests(unittest.TestCase):
             add_event(source, "past", "s", 1, 1, "2026-08-07T08:00:00Z")
             add_event(source, "current", "s", 2, 1, "2026-08-07T08:01:00Z")
             report = build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
-            for period, title in (("last", "Siste fullførte svar"), ("day", "I dag"),
-                                  ("week", "Denne ISO-uken"), ("month", "Denne måneden")):
+            for period, title in (("last", "Last completed answer"), ("day", "Current chat today"),
+                                  ("week", "Current chat this ISO week"), ("month", "Current chat this month")):
                 self.assertTrue(format_cost_report(report, period).startswith(title), period)
+            self.assertTrue(format_cost_report(report, "all", scope="all").startswith("All locally retained"))
+            self.assertTrue(format_cost_report(report, "day", scope="all").startswith("All Scout chats today"))
+
+    def test_bare_cost_faq_is_english_and_scope_explicit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source.db"; create_source(source)
+            add_event(source, "past", "s", 1, 1, "2026-08-07T08:00:00Z")
+            add_event(source, "current", "s", 2, 1, "2026-08-07T08:01:00Z")
+            report = build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
+            output = format_cost_report(report, faq=True)
+            self.assertIn("How to use `/cost`", output)
+            self.assertIn("`/cost today` — current chat today", output)
+            self.assertIn("`/cost all chats today` — all Scout chats today", output)
+            self.assertNotIn("Slik bruker du", output)
 
     def test_invalid_json_and_mismatch_statuses(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "source.db"; create_source(source)
             add_event(source, "bad-json", "s", 1, 1, "2026-08-07T08:00:00Z", raw="not-json")
             add_event(source, "current", "s", 2, 1, "2026-08-07T08:01:00Z")
-            self.assertEqual(build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc)).integrity, "warning")
+            self.assertEqual(build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc)).thread.integrity, "warning")
             connection = sqlite3.connect(source)
             connection.execute("UPDATE assistant_usage_events SET token_details_json=? WHERE id='bad-json'", (details(2),)); connection.commit(); connection.close()
-            self.assertEqual(build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc)).integrity, "failed")
+            self.assertEqual(build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc)).thread.integrity, "failed")
 
     def test_dst_day_boundaries_are_transition_aware(self):
         cases = (
@@ -145,7 +162,9 @@ class CostReportTests(unittest.TestCase):
                 add_event(source, "outside", "other", 1, 10, end)
                 add_event(source, "past", "s", 1, 1, start)
                 add_event(source, "current", "s", 2, 1, start)
-                self.assertEqual(build_cost_report(source, "s", "Europe/Oslo", now=now).today.model_calls, 3)
+                report = build_cost_report(source, "s", "Europe/Oslo", now=now)
+                self.assertEqual(report.chat_today.model_calls, 1)
+                self.assertEqual(report.all_today.model_calls, 3)
 
     def test_snapshot_is_fixed_by_first_read_before_concurrent_commit(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -157,7 +176,7 @@ class CostReportTests(unittest.TestCase):
                 add_event(source, "later", "other", 1, 50_000_000_000, "2026-08-07T09:00:00Z")
 
             report = build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc), _after_snapshot=commit_writer)
-            self.assertEqual(report.today.total_nano_aiu, 1_000_000_000)
+            self.assertEqual(report.all_today.total_nano_aiu, 1_000_000_000)
 
     def test_missing_database_schema_session_and_locked_database_fail_closed(self):
         with tempfile.TemporaryDirectory() as temporary:

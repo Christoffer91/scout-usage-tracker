@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 LEGACY_KEYS = {
     "sourceDatabase": "source_database",
     "historyDatabase": "history_database",
@@ -67,8 +67,14 @@ def _migrate(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             data.pop(presentation_key)
             changed = True
     version = data.get("schema_version", 0)
-    if version not in (0, 1, SCHEMA_VERSION):
+    if version not in (0, 1, 2, SCHEMA_VERSION):
         raise ConfigError(f"unsupported config schema_version: {version}")
+    if "language" not in data:
+        data["language"] = "en"
+        changed = True
+    if "usd_per_credit" not in data:
+        data["usd_per_credit"] = "0.01"
+        changed = True
     if version != SCHEMA_VERSION:
         data["schema_version"] = SCHEMA_VERSION
         changed = True
@@ -102,6 +108,10 @@ def validate_config(data: dict[str, Any], config_path: Path) -> dict[str, Any]:
         except ZoneInfoNotFoundError as exc:
             raise ConfigError(f"unknown IANA timezone: {timezone}") from exc
     result["timezone"] = timezone
+    language = str(result.get("language", "en")).lower().replace("_", "-")
+    if not (language.startswith("en") or language.startswith("nb") or language.startswith("no")):
+        raise ConfigError("language must be en or nb")
+    result["language"] = "nb" if language.startswith(("nb", "no")) else "en"
     privacy = result.get("privacy", {})
     if not isinstance(privacy, dict) or not isinstance(privacy.get("include_sessions", False), bool):
         raise ConfigError("privacy.include_sessions must be a boolean")
@@ -110,6 +120,13 @@ def validate_config(data: dict[str, Any], config_path: Path) -> dict[str, Any]:
     if not isinstance(rates, dict):
         raise ConfigError("usd_per_credit_by_model must be an object")
     result["usd_per_credit_by_model"] = rates
+    try:
+        usd_per_credit = Decimal(str(result.get("usd_per_credit", "0.01")))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ConfigError("usd_per_credit must be a nonnegative finite number") from exc
+    if not usd_per_credit.is_finite() or usd_per_credit < 0:
+        raise ConfigError("usd_per_credit must be a nonnegative finite number")
+    result["usd_per_credit"] = str(usd_per_credit)
     if result.get("usd_to_nok") is not None:
         try:
             exchange = Decimal(str(result["usd_to_nok"]))

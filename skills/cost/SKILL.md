@@ -1,24 +1,42 @@
 ---
 name: cost
-description: Show private local Scout usage for the current chat, last completed answer, day, ISO week, or month, including model calls, tokens, exact nano-AIU accounting, and configured cost estimates. Use whenever the user invokes /cost or asks what Scout usage has consumed.
+description: Show private local Scout usage for the current chat or explicitly all local chats, including last answer, day, ISO week, month, model calls, tokens, exact nano-AIU accounting, and gross cost estimates. Use whenever the user invokes /cost or asks what Scout usage has consumed, in English or another language.
 ---
 
 # Scout Cost
 
-For `/cost`, run the default thread report and return its output verbatim:
+Treat the current chat as the default scope. For bare `/cost`, run the current-chat report with the FAQ:
 
 ```sh
-${HOME}/.local/bin/scout-usage cost --period thread
+${HOME}/.local/bin/scout-usage cost --scope chat --period thread --faq
 ```
 
-For a follow-up, select exactly one supported period:
+Map explicit requests as follows:
 
 ```sh
-${HOME}/.local/bin/scout-usage cost --period last
-${HOME}/.local/bin/scout-usage cost --period day
-${HOME}/.local/bin/scout-usage cost --period week
-${HOME}/.local/bin/scout-usage cost --period month
+# Current chat (default scope)
+${HOME}/.local/bin/scout-usage cost --scope chat --period last
+${HOME}/.local/bin/scout-usage cost --scope chat --period thread
+${HOME}/.local/bin/scout-usage cost --scope chat --period day
+${HOME}/.local/bin/scout-usage cost --scope chat --period week
+${HOME}/.local/bin/scout-usage cost --scope chat --period month
+
+# All locally retained Scout chats (only when explicitly requested)
+${HOME}/.local/bin/scout-usage cost --scope all --period all
+${HOME}/.local/bin/scout-usage cost --scope all --period day
+${HOME}/.local/bin/scout-usage cost --scope all --period week
+${HOME}/.local/bin/scout-usage cost --scope all --period month
 ```
+
+Interpret equivalent natural-language phrases, including follow-ups. For example, `today`, `i dag`, `hoy`, or an equivalent phrase means the current chat today unless the user also explicitly says all chats.
+
+## Language
+
+- English is the default when the request contains no language signal.
+- For Norwegian requests, add `--language nb`.
+- For English requests, add `--language en` or use the configured default.
+- For another language, run the English command, translate only headings and explanatory prose into the user's language, and preserve every number, model name, unit, scope, integrity state, and caveat exactly.
+- Return command output without adding inferred usage or billing claims.
 
 The command uses Scout's active `SESSION_ID` when available. Calendar and automation surfaces may omit it; the tracker then accepts only one uniquely freshest local usage session within a strict time window. It reports usage before the current request, so the usage of the `/cost` response itself appears next time.
 
@@ -39,6 +57,7 @@ The command uses Scout's active `SESSION_ID` when available. Calendar and automa
 
 - `Last completed answer` can include several model calls belonging to one completed turn.
 - `Current chat` excludes the currently running `/cost` turn.
-- `Today` includes all local Scout chats in the configured IANA timezone, while excluding the current running `/cost` turn.
-- Week means the local ISO week; month means the local calendar month.
-- `AIU data` checks stored `total_nano_aiu` against independent recalculation from `token_details_json`; it does not verify billing.
+- Day, ISO week, and month use only the current chat unless the user explicitly requests all chats.
+- `All chats` means locally retained Scout chats only, never account-wide GitHub Copilot usage.
+- `AIU data` checks stored `total_nano_aiu` against independent recalculation from `token_details_json` for the selected report; it does not verify billing.
+- Gross USD uses GitHub's published conversion of USD 0.01 per AI credit. Model token rates are already reflected in Scout's exact credits. Actual billed usage can be lower or zero because of included credits.

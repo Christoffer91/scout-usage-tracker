@@ -72,15 +72,22 @@ def verification(total_nano: int, raw: str | None) -> tuple[str, Decimal | None,
     return "mismatch", calculated, f"stored and recalculated totals differ by {delta} nano AIU"
 
 
-def estimate_costs(credits_by_model: dict[str, Decimal], rates: dict[str, Any], usd_to_nok: Any = None) -> dict[str, Any]:
+def estimate_costs(
+    credits_by_model: dict[str, Decimal],
+    rates: dict[str, Any],
+    usd_to_nok: Any = None,
+    *,
+    default_rate: Any = None,
+) -> dict[str, Any]:
     per_model: dict[str, Decimal | None] = {}
     complete = True
     for model, credits in credits_by_model.items():
-        if model not in rates:
+        configured_rate = rates.get(model, default_rate)
+        if configured_rate is None:
             per_model[model] = None
             complete = False
             continue
-        rate = _decimal(rates[model], f"rate for {model}")
+        rate = _decimal(configured_rate, f"rate for {model}")
         if rate < 0:
             raise ValueError(f"rate for {model} must be nonnegative")
         per_model[model] = credits * rate

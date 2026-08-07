@@ -29,8 +29,22 @@ class CliBillingTests(unittest.TestCase):
             self.assertFalse(hasattr(args, "owner"))
 
     def test_cost_period_is_command_specific(self):
-        self.assertEqual(build_parser().parse_args(["cost"]).period, "thread")
+        self.assertIsNone(build_parser().parse_args(["cost"]).period)
         self.assertEqual(build_parser().parse_args(["cost", "--period", "month"]).period, "month")
+        args = build_parser().parse_args(["cost", "--scope", "all", "--period", "day", "--language", "nb", "--faq"])
+        self.assertEqual((args.scope, args.period, args.language, args.faq), ("all", "day", "nb", True))
+
+    def test_cost_defaults_to_chat_but_all_scope_defaults_to_all_history(self):
+        config = {"source_database": "/not/read", "timezone": "UTC", "language": "en",
+                  "usd_per_credit": "0.01", "usd_per_credit_by_model": {}, "usd_to_nok": None}
+        with patch.dict("os.environ", {"SESSION_ID": "s"}, clear=True), \
+             patch("scout_usage_tracker.cli.build_cost_report", return_value=object()), \
+             patch("scout_usage_tracker.cli.format_cost_report", return_value="ok") as render, \
+             redirect_stdout(StringIO()):
+            command_cost(config)
+            self.assertEqual(render.call_args.args[1], "thread")
+            command_cost(config, scope="all")
+            self.assertEqual(render.call_args.args[1], "all")
 
     def test_config_path_is_accepted_before_or_after_every_subcommand(self):
         config_path = "/tmp/fictional-scout-config.json"

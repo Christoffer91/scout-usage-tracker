@@ -32,7 +32,9 @@ class ConfigRenderTests(unittest.TestCase):
         path.chmod(0o640)
         config = load_config(path)
         migrated = json.loads(path.read_text())
-        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(migrated["schema_version"], 3)
+        self.assertEqual(config["language"], "en")
+        self.assertEqual(config["usd_per_credit"], "0.01")
         self.assertTrue(config["privacy"]["include_sessions"])
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
@@ -52,6 +54,18 @@ class ConfigRenderTests(unittest.TestCase):
         migrated = json.loads(path.read_text())
         for removed in ("estimatedUsdPerCredit", "accountWideSnapshot", "additionalUsageUsd", "pricingSource", "currency"):
             self.assertNotIn(removed, migrated)
+
+    def test_cost_language_and_global_credit_rate_validation(self):
+        path = self.root / "config.json"
+        base = {"source_database": "source.db", "history_database": "history.db", "dashboard_path": "dash.html"}
+        path.write_text(json.dumps({**base, "language": "no-NO", "usd_per_credit": "0.01"}), encoding="utf-8")
+        config = load_config(path)
+        self.assertEqual(config["language"], "nb")
+        self.assertEqual(config["usd_per_credit"], "0.01")
+        for key, value in (("language", "fr"), ("usd_per_credit", "NaN"), ("usd_per_credit", "-1")):
+            path.write_text(json.dumps({**base, key: value}), encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(path)
 
     def test_manual_comparison_validation_rejects_unsafe_shape(self):
         path = self.root / "config.json"
@@ -245,7 +259,7 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("no user overage is estimated", text)
         self.assertNotIn("Estimated additional usage</dt>", text)
 
-    def test_billing_gross_value_is_hero_fallback_when_model_rate_is_missing(self):
+    def test_official_credit_rate_prices_unknown_model_in_hero(self):
         source = self.root / "fallback-source.sqlite3"
         history = self.root / "fallback-history.sqlite3"
         dashboard = self.root / "fallback.html"
@@ -257,8 +271,8 @@ class ConfigRenderTests(unittest.TestCase):
             "billing": {"enabled": True, "plan": "unknown"}, "_generated_at": "2026-08-06T12:00:00Z",
         })
         text = dashboard.read_text()
-        self.assertIn('Estimated gross Scout value</span><strong data-money-total>USD 25', text)
-        self.assertIn('<small data-money-note>AI-credit estimate, not a bill</small>', text)
+        self.assertIn('Estimated cost</span><strong data-money-total>USD 25', text)
+        self.assertIn('<small data-money-note>estimate, not a bill</small>', text)
         self.assertNotIn("— · AI-credit estimate", text)
         self.assertNotIn("Plan &amp; billing estimates", text)
         self.assertNotIn("Plan source", text)

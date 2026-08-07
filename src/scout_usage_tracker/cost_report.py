@@ -41,6 +41,8 @@ class UsageSlice:
     output_tokens: int
     cache_read_tokens: int
     models: tuple[ModelUsage, ...]
+    integrity: str
+    checked_events: int
 
     @property
     def credits(self) -> Decimal:
@@ -51,11 +53,13 @@ class UsageSlice:
 class CostReport:
     last_answer: UsageSlice
     thread: UsageSlice
-    today: UsageSlice
-    week: UsageSlice
-    month: UsageSlice
-    integrity: str
-    checked_events: int
+    chat_today: UsageSlice
+    chat_week: UsageSlice
+    chat_month: UsageSlice
+    all_history: UsageSlice
+    all_today: UsageSlice
+    all_week: UsageSlice
+    all_month: UsageSlice
     session_resolution: str
 
 
@@ -63,7 +67,8 @@ _REQUIRED_USAGE_COLUMNS = {
     "id", "session_id", "turn_index", "model", "input_tokens", "output_tokens",
     "cache_read_tokens", "total_nano_aiu", "token_details_json", "created_at",
 }
-_PERIODS = {"last", "thread", "day", "week", "month"}
+_PERIODS = {"last", "thread", "all", "day", "week", "month"}
+_SCOPES = {"chat", "all"}
 
 
 def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
@@ -88,6 +93,7 @@ def _rows_to_slice(rows: list[sqlite3.Row]) -> UsageSlice:
         ModelUsage(model, values["nano"], values["calls"], values["input"], values["output"], values["cache"])
         for model, values in sorted(grouped.items(), key=lambda item: (-item[1]["nano"], item[0]))
     )
+    integrity, checked = _integrity(rows)
     return UsageSlice(
         sum(item.total_nano_aiu for item in models),
         sum(item.model_calls for item in models),
@@ -95,6 +101,8 @@ def _rows_to_slice(rows: list[sqlite3.Row]) -> UsageSlice:
         sum(item.output_tokens for item in models),
         sum(item.cache_read_tokens for item in models),
         models,
+        integrity,
+        checked,
     )
 
 
@@ -207,27 +215,38 @@ def build_cost_report(
             (session_id, completed_boundary),
         ).fetchall()
 
-        period_rows: dict[str, list[sqlite3.Row]] = {}
+        all_history_rows = connection.execute(
+            f"""SELECT {columns} FROM assistant_usage_events
+                WHERE session_id <> ? OR turn_index <= ?""",
+            (session_id, completed_boundary),
+        ).fetchall()
+        chat_period_rows: dict[str, list[sqlite3.Row]] = {}
+        all_period_rows: dict[str, list[sqlite3.Row]] = {}
         for name, (start, end) in period_bounds.items():
-            period_rows[name] = connection.execute(
+            chat_period_rows[name] = connection.execute(
+                f"""SELECT {columns} FROM assistant_usage_events
+                    WHERE session_id = ? AND turn_index <= ?
+                      AND julianday(created_at) >= julianday(?) AND julianday(created_at) < julianday(?)""",
+                (session_id, completed_boundary, _utc_text(start), _utc_text(end)),
+            ).fetchall()
+            all_period_rows[name] = connection.execute(
                 f"""SELECT {columns} FROM assistant_usage_events
                     WHERE julianday(created_at) >= julianday(?) AND julianday(created_at) < julianday(?)
                       AND (session_id <> ? OR turn_index <= ?)""",
                 (_utc_text(start), _utc_text(end), session_id, completed_boundary),
             ).fetchall()
 
-        all_groups = (last_rows, thread_rows, *period_rows.values())
-        unique = {str(row["id"]): row for rows in all_groups for row in rows}
-        integrity, checked = _integrity(list(unique.values()))
         connection.execute("COMMIT")
         return CostReport(
             last_answer=_rows_to_slice(last_rows),
             thread=_rows_to_slice(thread_rows),
-            today=_rows_to_slice(period_rows["day"]),
-            week=_rows_to_slice(period_rows["week"]),
-            month=_rows_to_slice(period_rows["month"]),
-            integrity=integrity,
-            checked_events=checked,
+            chat_today=_rows_to_slice(chat_period_rows["day"]),
+            chat_week=_rows_to_slice(chat_period_rows["week"]),
+            chat_month=_rows_to_slice(chat_period_rows["month"]),
+            all_history=_rows_to_slice(all_history_rows),
+            all_today=_rows_to_slice(all_period_rows["day"]),
+            all_week=_rows_to_slice(all_period_rows["week"]),
+            all_month=_rows_to_slice(all_period_rows["month"]),
             session_resolution=resolution,
         )
     except CostReportError:
@@ -239,24 +258,36 @@ def build_cost_report(
             connection.close()
 
 
-def _whole(value: Decimal) -> str:
-    return f"{value.quantize(Decimal('1'), rounding=ROUND_HALF_UP):,}".replace(",", " ")
+def _language(value: str) -> str:
+    normalized = value.lower().replace("_", "-")
+    if normalized.startswith("nb") or normalized.startswith("no"):
+        return "nb"
+    if normalized.startswith("en"):
+        return "en"
+    raise ValueError(f"unsupported cost language: {value}")
 
 
-def _integer(value: int) -> str:
-    return f"{value:,}".replace(",", " ")
+def _integer(value: int, language: str) -> str:
+    rendered = f"{value:,}"
+    return rendered.replace(",", " ") if language == "nb" else rendered
 
 
-def _tokens(value: int) -> str:
+def _whole(value: Decimal, language: str) -> str:
+    return _integer(int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP)), language)
+
+
+def _tokens(value: int, language: str) -> str:
     if value >= 1_000_000:
         millions = Decimal(value) / Decimal(1_000_000)
         return f"{millions.quantize(Decimal('1'), rounding=ROUND_HALF_UP)}M"
-    return _integer(value)
+    return _integer(value, language)
 
 
-def _money(value: Decimal, places: str = "0.01") -> str:
+def _money(value: Decimal, language: str, places: str = "0.01") -> str:
     rendered = f"{value.quantize(Decimal(places), rounding=ROUND_HALF_UP):,}"
-    return rendered.replace(",", "X").replace(".", ",").replace("X", " ")
+    if language == "nb":
+        return rendered.replace(",", "X").replace(".", ",").replace("X", " ")
+    return rendered
 
 
 def _model_name(model: str) -> str:
@@ -268,16 +299,50 @@ def _model_name(model: str) -> str:
     return model
 
 
-def _selected(report: CostReport, period: str) -> tuple[str, UsageSlice]:
-    if period not in _PERIODS:
+def _selected(report: CostReport, period: str, scope: str, language: str) -> tuple[str, UsageSlice]:
+    if period not in _PERIODS or scope not in _SCOPES:
         raise ValueError(f"unsupported cost period: {period}")
-    return {
-        "last": ("Siste fullførte svar", report.last_answer),
-        "thread": ("Denne chatten hittil", report.thread),
-        "day": ("I dag", report.today),
-        "week": ("Denne ISO-uken", report.week),
-        "month": ("Denne måneden", report.month),
-    }[period]
+    chat = {
+        "last": report.last_answer,
+        "thread": report.thread,
+        "day": report.chat_today,
+        "week": report.chat_week,
+        "month": report.chat_month,
+    }
+    all_chats = {
+        "all": report.all_history,
+        "day": report.all_today,
+        "week": report.all_week,
+        "month": report.all_month,
+    }
+    selected = chat if scope == "chat" else all_chats
+    if period not in selected:
+        raise ValueError(f"period {period} is not available for {scope} scope")
+    titles = {
+        "en": {
+            ("chat", "last"): "Last completed answer in this chat",
+            ("chat", "thread"): "Current chat so far (may span multiple days)",
+            ("chat", "day"): "Current chat today",
+            ("chat", "week"): "Current chat this ISO week",
+            ("chat", "month"): "Current chat this month",
+            ("all", "all"): "All locally retained Scout chats",
+            ("all", "day"): "All Scout chats today",
+            ("all", "week"): "All Scout chats this ISO week",
+            ("all", "month"): "All Scout chats this month",
+        },
+        "nb": {
+            ("chat", "last"): "Siste fullførte svar i denne chatten",
+            ("chat", "thread"): "Denne chatten hittil (kan omfatte flere dager)",
+            ("chat", "day"): "Denne chatten i dag",
+            ("chat", "week"): "Denne chatten denne ISO-uken",
+            ("chat", "month"): "Denne chatten denne måneden",
+            ("all", "all"): "Alle lokalt beholdte Scout-chatter",
+            ("all", "day"): "Alle Scout-chatter i dag",
+            ("all", "week"): "Alle Scout-chatter denne ISO-uken",
+            ("all", "month"): "Alle Scout-chatter denne måneden",
+        },
+    }
+    return titles[language][(scope, period)], selected[period]
 
 
 def format_cost_report(
@@ -285,42 +350,92 @@ def format_cost_report(
     period: str = "thread",
     rates: dict[str, Any] | None = None,
     usd_to_nok: Any = None,
+    *,
+    scope: str = "chat",
+    language: str = "en",
+    faq: bool = False,
+    default_usd_per_credit: Any = "0.01",
 ) -> str:
-    title, usage = _selected(report, period)
-    lines = [
-        f"{title}:",
-        "",
-        f"**{_integer(usage.model_calls)} modellkall**",
-        f"**{_whole(usage.credits)} Scout-credits** · eksakt beregnet fra nano-AIU, avrundet visning",
-        f"Input: **{_tokens(usage.input_tokens)} tokens**",
-        f"Output: **{_tokens(usage.output_tokens)} tokens**",
-        f"Cache-read: **{_tokens(usage.cache_read_tokens)} tokens**",
-    ]
+    language = _language(language)
+    title, usage = _selected(report, period, scope, language)
+    if language == "nb":
+        lines = [
+            f"{title}:", "",
+            f"**{_integer(usage.model_calls, language)} modellkall**",
+            f"**{_whole(usage.credits, language)} Scout-credits** · eksakt beregnet fra nano-AIU, avrundet visning",
+            f"Input: **{_tokens(usage.input_tokens, language)} tokens**",
+            f"Output: **{_tokens(usage.output_tokens, language)} tokens**",
+            f"Cache-read: **{_tokens(usage.cache_read_tokens, language)} tokens**",
+        ]
+    else:
+        lines = [
+            f"{title}:", "",
+            f"**{_integer(usage.model_calls, language)} model calls**",
+            f"**{_whole(usage.credits, language)} Scout credits** · exact from nano-AIU, rounded display",
+            f"Input: **{_tokens(usage.input_tokens, language)} tokens**",
+            f"Output: **{_tokens(usage.output_tokens, language)} tokens**",
+            f"Cache read: **{_tokens(usage.cache_read_tokens, language)} tokens**",
+        ]
 
-    pricing = estimate_costs({item.model: item.credits for item in usage.models}, rates or {}, usd_to_nok)
+    pricing = estimate_costs(
+        {item.model: item.credits for item in usage.models}, rates or {}, usd_to_nok,
+        default_rate=default_usd_per_credit,
+    )
     priced = [(item, pricing["per_model_usd"][item.model]) for item in usage.models
               if pricing["per_model_usd"].get(item.model) is not None]
     unpriced = [item for item in usage.models if pricing["per_model_usd"].get(item.model) is None]
-    lines.extend(["", "Kostnadsestimat:"])
+    lines.extend(["", "Kostnadsestimat:" if language == "nb" else "Estimated gross value:"])
     if priced:
         exchange = Decimal(str(usd_to_nok)) if usd_to_nok is not None else None
         for item, usd in priced:
-            cost = f"ca. **{_money(usd)} USD"
+            cost = ("ca. **" if language == "nb" else "approx. **") + f"USD {_money(usd, language)}"
             if exchange is not None:
-                cost += f" / {_money(usd * exchange, '1')} NOK"
-            lines.append(f"{_model_name(item.model)}-delen: {cost}**")
+                cost += f" / NOK {_money(usd * exchange, language, '1')}"
+            label = f"{_model_name(item.model)}-delen" if language == "nb" else _model_name(item.model)
+            lines.append(f"{label}: {cost}**")
     else:
-        lines.append("**—** Ingen modellpris er konfigurert for denne perioden.")
+        lines.append("**—** Ingen credit-pris er konfigurert." if language == "nb" else "**—** No credit price is configured.")
     if unpriced:
         credits = sum((item.credits for item in unpriced), Decimal(0))
         names = ", ".join(dict.fromkeys(_model_name(item.model) for item in unpriced))
-        lines.append(f"I tillegg: **{_money(credits)} credits** fra {names} uten konfigurert prisrate.")
-    lines.extend([
-        "Estimatet er ikke en faktura; inkluderte credits kan gjøre faktisk belastning lavere eller null.",
-        "",
-        "Dette er Scout-only og inkluderer ikke GitHub Copilot-appen eller andre Copilot-klienter.",
-        f"AIU-kontroll: **{report.integrity}** ({_integer(report.checked_events)} events kontrollert).",
-        "",
-        "Vil du se bruken i dag, hele uken, hele måneden eller kun siste fullførte svar?",
-    ])
+        if language == "nb":
+            lines.append(f"Uten pris: **{_money(credits, language)} credits** fra {names}.")
+        else:
+            lines.append(f"Unpriced: **{_money(credits, language)} credits** from {names}.")
+    if language == "nb":
+        lines.extend([
+            "Bruttoestimatet bruker GitHubs sats på USD 0,01 per AI credit. Det er ikke en faktura; inkluderte credits kan gjøre faktisk belastning lavere eller null.",
+            "", "Dette er Scout-only og inkluderer ikke GitHub Copilot-appen eller andre Copilot-klienter.",
+            f"AIU-kontroll: **{usage.integrity}** ({_integer(usage.checked_events, language)} events i denne rapporten kontrollert).",
+        ])
+    else:
+        lines.extend([
+            "The gross estimate uses GitHub's USD 0.01 per AI credit rate. It is not a bill; included credits may make the actual charge lower or zero.",
+            "", "This is Scout-only and excludes the GitHub Copilot app and other Copilot clients.",
+            f"AIU check: **{usage.integrity}** ({_integer(usage.checked_events, language)} events in this report checked).",
+        ])
+    if faq:
+        if language == "nb":
+            lines.extend([
+                "", "Slik bruker du `/cost`:",
+                "- `/cost i dag` — denne chatten i dag",
+                "- `/cost denne chatten` — denne chatten hittil",
+                "- `/cost siste svar` — siste fullførte svar i denne chatten",
+                "- `/cost alle chatter` — alle lokalt beholdte Scout-chatter",
+                "- `/cost alle chatter i dag` — alle Scout-chatter i dag",
+                "- `/cost alle chatter denne uken` — alle Scout-chatter denne ISO-uken",
+                "- `/cost alle chatter denne måneden` — alle Scout-chatter denne måneden",
+            ])
+        else:
+            lines.extend([
+                "", "How to use `/cost`:",
+                "- `/cost today` — current chat today",
+                "- `/cost this chat` — current chat so far",
+                "- `/cost last answer` — last completed answer in this chat",
+                "- `/cost all chats` — all locally retained Scout chats",
+                "- `/cost all chats today` — all Scout chats today",
+                "- `/cost all chats this week` — all Scout chats this ISO week",
+                "- `/cost all chats this month` — all Scout chats this month",
+                "Write the request in another language to receive a localized response when supported.",
+            ])
     return "\n".join(lines)

@@ -467,7 +467,12 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
         connection.close()
     data = aggregate(rows, config["timezone"], config["privacy"]["include_sessions"])
     credits_by_model = {item["label"]: item["credits"] for item in data["groups"]["model"]}
-    estimates = estimate_costs(credits_by_model, config.get("usd_per_credit_by_model", {}), config.get("usd_to_nok"))
+    estimates = estimate_costs(
+        credits_by_model,
+        config.get("usd_per_credit_by_model", {}),
+        config.get("usd_to_nok"),
+        default_rate=config.get("usd_per_credit", "0.01"),
+    )
     model_prices = estimates["per_model_usd"]
     total = data["total"]
     cache_share = "—" if total["cache_share"] is None else f"{total['cache_share'] * 100:.1f}%"

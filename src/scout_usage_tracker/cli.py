@@ -61,10 +61,26 @@ def command_status(config: dict) -> int:
     return 0 if source.status == "ok" else 2
 
 
-def command_cost(config: dict, period: str = "thread") -> int:
+def command_cost(
+    config: dict,
+    period: str | None = None,
+    scope: str = "chat",
+    language: str | None = None,
+    faq: bool = False,
+) -> int:
     session_id = os.environ.get("SESSION_ID", "")
     report = build_cost_report(config["source_database"], session_id, config["timezone"])
-    print(format_cost_report(report, period, config["usd_per_credit_by_model"], config.get("usd_to_nok")))
+    selected_period = period or ("all" if scope == "all" else "thread")
+    print(format_cost_report(
+        report,
+        selected_period,
+        config["usd_per_credit_by_model"],
+        config.get("usd_to_nok"),
+        scope=scope,
+        language=language or config.get("language", "en"),
+        faq=faq,
+        default_usd_per_credit=config.get("usd_per_credit", "0.01"),
+    ))
     return 0
 
 
@@ -110,7 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
     cost = commands.add_parser("cost", help="show local Scout usage before the current /cost turn")
     cost.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
-    cost.add_argument("--period", choices=("thread", "last", "day", "week", "month"), default="thread")
+    cost.add_argument("--period", choices=("thread", "last", "all", "day", "week", "month"))
+    cost.add_argument("--scope", choices=("chat", "all"), default="chat")
+    cost.add_argument("--language", choices=("en", "nb"))
+    cost.add_argument("--faq", action="store_true", help="append the /cost usage guide")
     current = datetime.now(timezone.utc)
     sync = commands.add_parser("github-sync", help="explicitly fetch aggregate GitHub billing usage through gh")
     sync.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
@@ -132,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             return command_status(config)
         if args.command == "cost":
-            return command_cost(config, args.period)
+            return command_cost(config, args.period, args.scope, args.language, args.faq)
         if args.command == "github-sync":
             return command_github_sync(config, args.scope, args.owner, args.year, args.month)
         return command_open(config)
