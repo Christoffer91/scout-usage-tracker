@@ -277,7 +277,8 @@ def _model_share(models: list[dict[str, Any]]) -> str:
     return (
         '<section class="card model-card" data-model-card><div class="model-heading"><div><h2>Model share</h2>'
         '<p>Select models to include across usage totals and charts.</p></div>'
-        '<button type="button" class="show-all-models" data-show-all hidden>Show all</button></div>'
+        '<button type="button" class="show-all-models is-concealed" data-show-all '
+        'aria-hidden="true" tabindex="-1">Show all</button></div>'
         '<div class="model-layout"><div class="donut-wrap">'
         f'<div class="donut" data-donut style="--donut:{gradient}" role="img" tabindex="0" '
         'aria-label="Credit share by model. Move the pointer around the ring for model details.">'

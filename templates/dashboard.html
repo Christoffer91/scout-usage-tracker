@@ -116,7 +116,8 @@
     }
     .hero-card { display: flex; align-items: flex-end; gap: 40px; padding: 28px 32px; flex-wrap: wrap; }
     .hero-total { min-width: 190px; }
-    .filter-summary { display: block; margin-top: 7px; color: var(--d-accent); font-size: 12px; font-weight: 650; }
+    .filter-summary { display: block; min-height: 18px; margin-top: 7px; color: var(--d-accent); font-size: 12px; font-weight: 650; }
+    .filter-summary.is-concealed { visibility: hidden; }
     .eyebrow { color: var(--d-muted-text); font-size: 13px; font-weight: 600; }
     .total-number {
       margin-top: 4px;
@@ -163,7 +164,7 @@
     .hero-kpi { min-width: 92px; }
     .hero-kpi > span { display: block; color: var(--d-muted-text); font-size: 12.5px; }
     .hero-kpi strong { display: block; margin-top: 1px; color: var(--d-strong); font-size: 21px; line-height: 1.25; font-weight: 700; }
-    .hero-kpi small { display: block; max-width: 155px; color: var(--d-muted-text); font-size: 11.5px; }
+    .hero-kpi small { display: block; min-height: 3em; max-width: 155px; color: var(--d-muted-text); font-size: 11.5px; line-height: 1.5; }
     .chart-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 24px; }
     .daily-card, .model-card { padding: 24px 28px; }
     .card-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
@@ -205,6 +206,7 @@
       cursor: pointer;
     }
     .show-all-models:hover { border-color: var(--d-accent); }
+    .show-all-models.is-concealed { visibility: hidden; pointer-events: none; }
     .model-layout { display: flex; align-items: center; gap: 24px; margin-top: 20px; flex: 1; }
     .donut-wrap { position: relative; flex: none; }
     .donut {
@@ -395,7 +397,7 @@
       <div class="eyebrow">Total Scout-only credits</div>
       <div class="total-number" data-total-credits>{{TOTAL_CREDITS}}</div>
       <div class="delta {{DELTA_CLASS}}" data-delta>{{DELTA_TEXT}}</div>
-      <span class="filter-summary" data-filter-summary hidden></span>
+      <span class="filter-summary is-concealed" data-filter-summary aria-hidden="true">Filtered view</span>
     </div>
     {{SPARKLINE}}
     <div class="hero-kpis">
@@ -833,7 +835,10 @@
       row.querySelector('.model-credits').textContent = whole.format(credits(model.total));
     });
     filterStatus.textContent = `${selected.size} of ${models.length} models included`;
-    showAll.hidden = selected.size === models.length;
+    const allModelsIncluded = selected.size === models.length;
+    showAll.classList.toggle('is-concealed', allModelsIncluded);
+    showAll.setAttribute('aria-hidden', String(allModelsIncluded));
+    showAll.tabIndex = allModelsIncluded ? -1 : 0;
     resetDonut();
   };
   donut.addEventListener('pointermove', (event) => {
@@ -897,8 +902,12 @@
     const denominator = view.total.input + view.total.cache_read;
     document.querySelector('[data-total-cache]').textContent = denominator ? `${(view.total.cache_read / denominator * 100).toFixed(1)}%` : '—';
     const summary = document.querySelector('[data-filter-summary]');
-    summary.hidden = selected.size === models.length;
-    summary.textContent = `Filtered view · ${selected.size} of ${models.length} models`;
+    const allModelsIncluded = selected.size === models.length;
+    summary.classList.toggle('is-concealed', allModelsIncluded);
+    summary.setAttribute('aria-hidden', String(allModelsIncluded));
+    summary.textContent = allModelsIncluded
+      ? 'Filtered view'
+      : `Filtered view · ${selected.size} of ${models.length} models`;
     updateMoney(view.total);
     updateTrend(view.groups.day);
     updateSpark(view.groups.day);

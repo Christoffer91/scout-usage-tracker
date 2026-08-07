@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scout_usage_tracker.cost_report import CostReportError, build_cost_report, format_cost_report
+from scout_usage_tracker.cost_report import CostReportError, build_cost_report, format_cost_faq, format_cost_report
 
 
 def details(nano: int) -> str:
@@ -104,15 +104,15 @@ class CostReportTests(unittest.TestCase):
             output = format_cost_report(report, "thread", {"gpt-5.6-sol": "0.01"}, "10", language="nb")
             self.assertIn("Denne chatten hittil (kan omfatte flere dager)", output)
             self.assertIn("**2 modellkall**", output)
-            self.assertIn("**2 Scout-credits** · eksakt beregnet fra nano-AIU, avrundet visning", output)
+            self.assertIn("**2 Scout-credits**", output)
             self.assertIn("Input: **235M tokens**", output)
             self.assertIn("Output: **147 602 tokens**", output)
             self.assertIn("Cache-read: **228M tokens**", output)
             self.assertIn("GPT-5.6 Sol-delen: ca. **USD 0,02 / NOK 0**", output)
             self.assertIn("GPT-5.6 Luna-delen: ca. **USD 0,01 / NOK 0**", output)
             self.assertNotIn("Uten pris", output)
-            self.assertIn("ikke en faktura", output)
             self.assertIn("Scout-only", output)
+            self.assertIn("`/cost FAQ`", output)
 
     def test_period_titles(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -126,17 +126,28 @@ class CostReportTests(unittest.TestCase):
             self.assertTrue(format_cost_report(report, "all", scope="all").startswith("All locally retained"))
             self.assertTrue(format_cost_report(report, "day", scope="all").startswith("All Scout chats today"))
 
-    def test_bare_cost_faq_is_english_and_scope_explicit(self):
+    def test_cost_faq_is_separate_english_help_with_scope_and_caveats(self):
+        output = format_cost_faq()
+        self.assertIn("How to use `/cost`", output)
+        self.assertIn("`/cost today` — current chat today", output)
+        self.assertIn("`/cost all chats today` — all Scout chats today", output)
+        self.assertIn("rounded whole credits", output)
+        self.assertIn("not a bill", output)
+        self.assertNotIn("Slik bruker du", output)
+
+    def test_dashboard_uri_is_an_html_hyperlink_and_normal_report_stays_short(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "source.db"; create_source(source)
             add_event(source, "past", "s", 1, 1, "2026-08-07T08:00:00Z")
             add_event(source, "current", "s", 2, 1, "2026-08-07T08:01:00Z")
             report = build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
-            output = format_cost_report(report, faq=True)
-            self.assertIn("How to use `/cost`", output)
-            self.assertIn("`/cost today` — current chat today", output)
-            self.assertIn("`/cost all chats today` — all Scout chats today", output)
-            self.assertNotIn("Slik bruker du", output)
+            uri = "file:///tmp/Scout%20Usage/dashboard.html"
+            output = format_cost_report(report, language="nb", dashboard_uri=uri)
+            self.assertIn(f'<a href="{uri}">{uri}</a>', output)
+            self.assertIn("Sjekk", output)
+            self.assertNotIn("Slik bruker du `/cost`", output)
+            self.assertNotIn("AIU-kontroll", output)
+            self.assertNotIn("ikke en faktura", output)
 
     def test_invalid_json_and_mismatch_statuses(self):
         with tempfile.TemporaryDirectory() as temporary:

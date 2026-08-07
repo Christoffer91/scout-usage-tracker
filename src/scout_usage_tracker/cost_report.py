@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
+from html import escape
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
@@ -353,8 +354,8 @@ def format_cost_report(
     *,
     scope: str = "chat",
     language: str = "en",
-    faq: bool = False,
     default_usd_per_credit: Any = "0.01",
+    dashboard_uri: str | None = None,
 ) -> str:
     language = _language(language)
     title, usage = _selected(report, period, scope, language)
@@ -362,7 +363,7 @@ def format_cost_report(
         lines = [
             f"{title}:", "",
             f"**{_integer(usage.model_calls, language)} modellkall**",
-            f"**{_whole(usage.credits, language)} Scout-credits** · eksakt beregnet fra nano-AIU, avrundet visning",
+            f"**{_whole(usage.credits, language)} Scout-credits**",
             f"Input: **{_tokens(usage.input_tokens, language)} tokens**",
             f"Output: **{_tokens(usage.output_tokens, language)} tokens**",
             f"Cache-read: **{_tokens(usage.cache_read_tokens, language)} tokens**",
@@ -371,7 +372,7 @@ def format_cost_report(
         lines = [
             f"{title}:", "",
             f"**{_integer(usage.model_calls, language)} model calls**",
-            f"**{_whole(usage.credits, language)} Scout credits** · exact from nano-AIU, rounded display",
+            f"**{_whole(usage.credits, language)} Scout credits**",
             f"Input: **{_tokens(usage.input_tokens, language)} tokens**",
             f"Output: **{_tokens(usage.output_tokens, language)} tokens**",
             f"Cache read: **{_tokens(usage.cache_read_tokens, language)} tokens**",
@@ -402,40 +403,51 @@ def format_cost_report(
             lines.append(f"Uten pris: **{_money(credits, language)} credits** fra {names}.")
         else:
             lines.append(f"Unpriced: **{_money(credits, language)} credits** from {names}.")
+    safe_link = None if not dashboard_uri else f'<a href="{escape(dashboard_uri, quote=True)}">{escape(dashboard_uri)}</a>'
     if language == "nb":
-        lines.extend([
-            "Bruttoestimatet bruker GitHubs sats på USD 0,01 per AI credit. Det er ikke en faktura; inkluderte credits kan gjøre faktisk belastning lavere eller null.",
-            "", "Dette er Scout-only og inkluderer ikke GitHub Copilot-appen eller andre Copilot-klienter.",
-            f"AIU-kontroll: **{usage.integrity}** ({_integer(usage.checked_events, language)} events i denne rapporten kontrollert).",
-        ])
+        lines.extend(["", "Dette er Scout-only og inkluderer ikke GitHub Copilot-appen eller andre Copilot-klienter."])
+        if safe_link:
+            lines.append(f"Sjekk {safe_link} for detaljer og historikk.")
+        lines.extend(["", "Vil du vite hvordan du bruker `/cost` til flere oppgaver? Skriv “`/cost FAQ`”."])
     else:
-        lines.extend([
-            "The gross estimate uses GitHub's USD 0.01 per AI credit rate. It is not a bill; included credits may make the actual charge lower or zero.",
-            "", "This is Scout-only and excludes the GitHub Copilot app and other Copilot clients.",
-            f"AIU check: **{usage.integrity}** ({_integer(usage.checked_events, language)} events in this report checked).",
-        ])
-    if faq:
-        if language == "nb":
-            lines.extend([
-                "", "Slik bruker du `/cost`:",
-                "- `/cost i dag` — denne chatten i dag",
-                "- `/cost denne chatten` — denne chatten hittil",
-                "- `/cost siste svar` — siste fullførte svar i denne chatten",
-                "- `/cost alle chatter` — alle lokalt beholdte Scout-chatter",
-                "- `/cost alle chatter i dag` — alle Scout-chatter i dag",
-                "- `/cost alle chatter denne uken` — alle Scout-chatter denne ISO-uken",
-                "- `/cost alle chatter denne måneden` — alle Scout-chatter denne måneden",
-            ])
-        else:
-            lines.extend([
-                "", "How to use `/cost`:",
-                "- `/cost today` — current chat today",
-                "- `/cost this chat` — current chat so far",
-                "- `/cost last answer` — last completed answer in this chat",
-                "- `/cost all chats` — all locally retained Scout chats",
-                "- `/cost all chats today` — all Scout chats today",
-                "- `/cost all chats this week` — all Scout chats this ISO week",
-                "- `/cost all chats this month` — all Scout chats this month",
-                "Write the request in another language to receive a localized response when supported.",
-            ])
+        lines.extend(["", "This is Scout-only and excludes the GitHub Copilot app and other Copilot clients."])
+        if safe_link:
+            lines.append(f"Check {safe_link} for details and history.")
+        lines.extend(["", "Want to learn more ways to use `/cost`? Type “`/cost FAQ`”."])
     return "\n".join(lines)
+
+
+def format_cost_faq(language: str = "en") -> str:
+    """Return usage help without reading or exposing any Scout usage data."""
+    language = _language(language)
+    if language == "nb":
+        return "\n".join([
+            "Slik bruker du `/cost`:", "",
+            "- `/cost` — denne chatten hittil",
+            "- `/cost i dag` — denne chatten i dag",
+            "- `/cost denne uken` — denne chatten denne ISO-uken",
+            "- `/cost denne måneden` — denne chatten denne måneden",
+            "- `/cost siste svar` — siste fullførte svar i denne chatten",
+            "- `/cost alle chatter` — alle lokalt beholdte Scout-chatter",
+            "- `/cost alle chatter i dag` — alle Scout-chatter i dag",
+            "- `/cost alle chatter denne uken` — alle Scout-chatter denne ISO-uken",
+            "- `/cost alle chatter denne måneden` — alle Scout-chatter denne måneden",
+            "", "Dager, uker og måneder gjelder alltid denne chatten med mindre du eksplisitt skriver «alle chatter».",
+            "Credits beregnes eksakt fra nano-AIU, men vises avrundet til hele credits. USD/NOK er bruttoestimater, ikke en faktura; inkluderte credits kan gjøre faktisk belastning lavere eller null.",
+            "AIU-verifisering og full historikk vises i det lokale dashboardet.",
+        ])
+    return "\n".join([
+        "How to use `/cost`:", "",
+        "- `/cost` — current chat so far",
+        "- `/cost today` — current chat today",
+        "- `/cost this week` — current chat this ISO week",
+        "- `/cost this month` — current chat this month",
+        "- `/cost last answer` — last completed answer in this chat",
+        "- `/cost all chats` — all locally retained Scout chats",
+        "- `/cost all chats today` — all Scout chats today",
+        "- `/cost all chats this week` — all Scout chats this ISO week",
+        "- `/cost all chats this month` — all Scout chats this month",
+        "", "Day, week, and month always mean the current chat unless you explicitly say all chats.",
+        "Credits are calculated exactly from nano-AIU but displayed as rounded whole credits. USD/NOK values are gross estimates, not a bill; included credits may make the actual charge lower or zero.",
+        "AIU verification and full history are available in the local dashboard.",
+    ])

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import ConfigError, ensure_secret, load_config
-from .cost_report import CostReportError, build_cost_report, format_cost_report
+from .cost_report import CostReportError, build_cost_report, format_cost_faq, format_cost_report
 from .import_usage import import_usage
 from .render import render_dashboard
 from .source import read_source
@@ -68,18 +68,23 @@ def command_cost(
     language: str | None = None,
     faq: bool = False,
 ) -> int:
+    selected_language = language or config.get("language", "en")
+    if faq:
+        print(format_cost_faq(selected_language))
+        return 0
     session_id = os.environ.get("SESSION_ID", "")
     report = build_cost_report(config["source_database"], session_id, config["timezone"])
     selected_period = period or ("all" if scope == "all" else "thread")
+    dashboard_uri = Path(config["dashboard_path"]).expanduser().resolve(strict=False).as_uri()
     print(format_cost_report(
         report,
         selected_period,
         config["usd_per_credit_by_model"],
         config.get("usd_to_nok"),
         scope=scope,
-        language=language or config.get("language", "en"),
-        faq=faq,
+        language=selected_language,
         default_usd_per_credit=config.get("usd_per_credit", "0.01"),
+        dashboard_uri=dashboard_uri,
     ))
     return 0
 
@@ -129,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     cost.add_argument("--period", choices=("thread", "last", "all", "day", "week", "month"))
     cost.add_argument("--scope", choices=("chat", "all"), default="chat")
     cost.add_argument("--language", choices=("en", "nb"))
-    cost.add_argument("--faq", action="store_true", help="append the /cost usage guide")
+    cost.add_argument("--faq", action="store_true", help="show the /cost usage guide without reading usage data")
     current = datetime.now(timezone.utc)
     sync = commands.add_parser("github-sync", help="explicitly fetch aggregate GitHub billing usage through gh")
     sync.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")

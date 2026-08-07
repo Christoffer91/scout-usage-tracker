@@ -5,10 +5,16 @@ description: Show private local Scout usage for the current chat or explicitly a
 
 # Scout Cost
 
-Treat the current chat as the default scope. For bare `/cost`, run the current-chat report with the FAQ:
+Treat the current chat as the default scope. For bare `/cost`, run only the short current-chat report:
 
 ```sh
-${HOME}/.local/bin/scout-usage cost --scope chat --period thread --faq
+${HOME}/.local/bin/scout-usage cost --scope chat --period thread
+```
+
+For `/cost FAQ` or an equivalent help request, return only the usage guide. This command does not read usage data:
+
+```sh
+${HOME}/.local/bin/scout-usage cost --faq
 ```
 
 Map explicit requests as follows:
@@ -45,6 +51,7 @@ The command uses Scout's active `SESSION_ID` when available. Calendar and automa
 - Keep Scout's SQLite database read-only.
 - Do not use the network or upload any data.
 - Do not display prompts, responses, raw session IDs, database paths, or raw token details.
+- The generated dashboard hyperlink is the only permitted local path in the response. Preserve the command-generated HTML link exactly; never construct or guess it in the skill.
 - Preserve the statement that nano-AIU accounting is exact while the whole-credit display is rounded. Never call a rounded integer itself exact.
 - Do not describe the values as GitHub billing, an invoice, currency cost, or account-wide Copilot usage.
 - Use only configured per-model price rates. Keep models without a rate in the separate credit remainder; never invent a rate.

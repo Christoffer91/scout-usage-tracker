@@ -13,7 +13,8 @@ from tests.helpers import event, make_source
 class CliBillingTests(unittest.TestCase):
     def test_cost_delegates_missing_session_to_safe_autodetection(self):
         output = StringIO()
-        config = {"source_database": "/not/read", "timezone": "UTC", "usd_per_credit_by_model": {}, "usd_to_nok": None}
+        config = {"source_database": "/not/read", "dashboard_path": "/tmp/dashboard.html",
+                  "timezone": "UTC", "usd_per_credit_by_model": {}, "usd_to_nok": None}
         with patch.dict("os.environ", {}, clear=True), \
              patch("scout_usage_tracker.cli.build_cost_report", return_value=object()) as build, \
              patch("scout_usage_tracker.cli.format_cost_report", return_value="ok"), redirect_stdout(output):
@@ -35,7 +36,8 @@ class CliBillingTests(unittest.TestCase):
         self.assertEqual((args.scope, args.period, args.language, args.faq), ("all", "day", "nb", True))
 
     def test_cost_defaults_to_chat_but_all_scope_defaults_to_all_history(self):
-        config = {"source_database": "/not/read", "timezone": "UTC", "language": "en",
+        config = {"source_database": "/not/read", "dashboard_path": "/tmp/dashboard.html",
+                  "timezone": "UTC", "language": "en",
                   "usd_per_credit": "0.01", "usd_per_credit_by_model": {}, "usd_to_nok": None}
         with patch.dict("os.environ", {"SESSION_ID": "s"}, clear=True), \
              patch("scout_usage_tracker.cli.build_cost_report", return_value=object()), \
@@ -45,6 +47,13 @@ class CliBillingTests(unittest.TestCase):
             self.assertEqual(render.call_args.args[1], "thread")
             command_cost(config, scope="all")
             self.assertEqual(render.call_args.args[1], "all")
+
+    def test_faq_does_not_read_usage_database_or_require_a_session(self):
+        config = {"language": "en"}
+        with patch("scout_usage_tracker.cli.build_cost_report") as build, redirect_stdout(StringIO()) as output:
+            self.assertEqual(command_cost(config, faq=True), 0)
+        build.assert_not_called()
+        self.assertIn("How to use `/cost`", output.getvalue())
 
     def test_config_path_is_accepted_before_or_after_every_subcommand(self):
         config_path = "/tmp/fictional-scout-config.json"
