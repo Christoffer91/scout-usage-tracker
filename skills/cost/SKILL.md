@@ -5,21 +5,59 @@ description: Show private local Scout usage for the current chat or explicitly a
 
 # Scout Cost
 
-Treat the current chat as the default scope. For bare `/cost`, run only the short current-chat report:
+Select the launcher for the host before every mapping below:
 
-```sh
+- Windows PowerShell: `& "$env:USERPROFILE\.local\bin\scout-usage.cmd"`
+- macOS/POSIX: `${HOME}/.local/bin/scout-usage`
+
+Never show the selected launcher path in the response. Treat the current chat as the default scope. For bare `/cost`, run only the short current-chat report:
+
+```text
+# Windows PowerShell
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope chat --period thread --dashboard-link loopback
+# macOS/POSIX
 ${HOME}/.local/bin/scout-usage cost --scope chat --period thread
 ```
 
 For `/cost FAQ` or an equivalent help request, return only the usage guide. This command does not read usage data:
 
-```sh
+```text
+# Windows PowerShell
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --faq
+# macOS/POSIX
 ${HOME}/.local/bin/scout-usage cost --faq
 ```
 
+For `/cost open`, `open usage tracker`, or an equivalent request, open the generated dashboard through the
+installed native launcher. Do not follow or reconstruct the dashboard's `file://` link: Scout can reject local
+links outside the active workspace even when the file is valid.
+
+```text
+# Windows PowerShell
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" open
+# macOS/POSIX
+${HOME}/.local/bin/scout-usage open
+```
+
+Return only a short success or failure message. Never display the launcher path or dashboard path.
+
 Map explicit requests as follows:
 
-```sh
+```text
+# Windows PowerShell: current chat (default scope)
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope chat --period last --dashboard-link loopback
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope chat --period thread --dashboard-link loopback
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope chat --period day --dashboard-link loopback
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope chat --period week --dashboard-link loopback
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope chat --period month --dashboard-link loopback
+
+# Windows PowerShell: all locally retained Scout chats (only when explicitly requested)
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope all --period all --dashboard-link loopback
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope all --period day --dashboard-link loopback
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope all --period week --dashboard-link loopback
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope all --period month --dashboard-link loopback
+
+# macOS/POSIX: current chat (default scope)
 # Current chat (default scope)
 ${HOME}/.local/bin/scout-usage cost --scope chat --period last
 ${HOME}/.local/bin/scout-usage cost --scope chat --period thread
@@ -27,7 +65,7 @@ ${HOME}/.local/bin/scout-usage cost --scope chat --period day
 ${HOME}/.local/bin/scout-usage cost --scope chat --period week
 ${HOME}/.local/bin/scout-usage cost --scope chat --period month
 
-# All locally retained Scout chats (only when explicitly requested)
+# macOS/POSIX: all locally retained Scout chats (only when explicitly requested)
 ${HOME}/.local/bin/scout-usage cost --scope all --period all
 ${HOME}/.local/bin/scout-usage cost --scope all --period day
 ${HOME}/.local/bin/scout-usage cost --scope all --period week
@@ -43,22 +81,24 @@ Interpret equivalent natural-language phrases, including follow-ups. For example
 - For English requests, add `--language en` or use the configured default.
 - For another language, run the English command, translate only headings and explanatory prose into the user's language, and preserve every number, model name, unit, scope, integrity state, and caveat exactly.
 - Return command output without adding inferred usage or billing claims.
+- Preserve the command output's final `/cost FAQ` invitation verbatim, including its ASCII quotation marks. It is part of every normal report and must never be reformatted, summarized, shortened, or omitted.
 
 The command uses Scout's active `SESSION_ID` when available. Calendar and automation surfaces may omit it; the tracker then accepts only one uniquely freshest local usage session within a strict time window. It reports usage before the current request, so the usage of the `/cost` response itself appears next time.
 
 ## Safety contract
 
 - Keep Scout's SQLite database read-only.
-- Do not use the network or upload any data.
+- Do not use external network interfaces or upload any data. On Windows, the command-generated dashboard link may use its bounded, token-protected `127.0.0.1` viewer; macOS/POSIX keeps the direct local file link.
 - Do not display prompts, responses, raw session IDs, database paths, or raw token details.
-- The generated dashboard hyperlink is the only permitted local path in the response. Preserve the command-generated HTML link and its short visible label `Usage tracker` exactly; never reveal, construct, or guess the target path in the skill.
+- Preserve the command-generated HTML link and its short visible label `Usage tracker` exactly; never reveal, construct, guess, or display the full launcher path, dashboard path, or link target in the skill response. Its random loopback URL expires after one successful dashboard fetch or five minutes.
+- `/cost open` remains a native-launcher fallback if the short-lived hyperlink has expired or cannot start.
 - Preserve the statement that nano-AIU accounting is exact while the whole-credit display is rounded. Never call a rounded integer itself exact.
 - Do not describe the values as GitHub billing, an invoice, currency cost, or account-wide Copilot usage.
 - Use only configured per-model price rates. Keep models without a rate in the separate credit remainder; never invent a rate.
 - Do not substitute `m_get_context_usage`, context-window percentages, subscription pricing, or a generic monetary-cost answer for the tracker command.
 - If the command is missing or fails, return the short error. Do not infer or fabricate values.
 - If the command reports multiple active conversations, ask the user to wait a few seconds and invoke `/cost` again. Do not choose a session yourself.
-- Do not install software, change configuration, refresh the dashboard, or enable a background job while answering `/cost`.
+- Do not install software, change configuration, refresh the dashboard, or enable a persistent background job while answering `/cost`. The approved on-demand loopback viewer is bounded to one fetch or five minutes.
 
 ## Meaning of the lines
 

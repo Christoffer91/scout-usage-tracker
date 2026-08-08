@@ -34,6 +34,7 @@ class CliBillingTests(unittest.TestCase):
         self.assertEqual(build_parser().parse_args(["cost", "--period", "month"]).period, "month")
         args = build_parser().parse_args(["cost", "--scope", "all", "--period", "day", "--language", "nb", "--faq"])
         self.assertEqual((args.scope, args.period, args.language, args.faq), ("all", "day", "nb", True))
+        self.assertEqual(build_parser().parse_args(["cost", "--dashboard-link", "loopback"]).dashboard_link, "loopback")
 
     def test_cost_defaults_to_chat_but_all_scope_defaults_to_all_history(self):
         config = {"source_database": "/not/read", "dashboard_path": "/tmp/dashboard.html",
@@ -50,10 +51,26 @@ class CliBillingTests(unittest.TestCase):
 
     def test_faq_does_not_read_usage_database_or_require_a_session(self):
         config = {"language": "en"}
-        with patch("scout_usage_tracker.cli.build_cost_report") as build, redirect_stdout(StringIO()) as output:
-            self.assertEqual(command_cost(config, faq=True), 0)
+        with patch("scout_usage_tracker.cli.build_cost_report") as build, \
+             patch("scout_usage_tracker.cli.start_dashboard_viewer") as viewer, \
+             redirect_stdout(StringIO()) as output:
+            self.assertEqual(command_cost(config, faq=True, dashboard_link="loopback"), 0)
         build.assert_not_called()
+        viewer.assert_not_called()
         self.assertIn("How to use `/cost`", output.getvalue())
+
+    def test_cost_can_request_a_private_loopback_dashboard_link(self):
+        config = {"source_database": "/not/read", "history_database": "/private/history.db",
+                  "dashboard_path": "/private/dashboard.html", "timezone": "UTC",
+                  "usd_per_credit_by_model": {}, "usd_to_nok": None}
+        safe_url = "http://127.0.0.1:54321/view/synthetic-token"
+        with patch("scout_usage_tracker.cli.build_cost_report", return_value=object()), \
+             patch("scout_usage_tracker.cli.start_dashboard_viewer", return_value=safe_url) as viewer, \
+             patch("scout_usage_tracker.cli.format_cost_report", return_value="ok") as render, \
+             redirect_stdout(StringIO()):
+            self.assertEqual(command_cost(config, dashboard_link="loopback"), 0)
+        viewer.assert_called_once_with(Path("/private/dashboard.html"), Path("/private"))
+        self.assertEqual(render.call_args.kwargs["dashboard_uri"], safe_url)
 
     def test_config_path_is_accepted_before_or_after_every_subcommand(self):
         config_path = "/tmp/fictional-scout-config.json"
@@ -99,7 +116,7 @@ class CliBillingTests(unittest.TestCase):
                 "billing": {"enabled": True, "plan": "pro", "snapshot_path": str(root / "billing.json")},
             }), encoding="utf-8")
             config_path.chmod(0o600)
-            with patch("scout_usage_tracker.github_billing._run_gh") as network, patch("scout_usage_tracker.cli.subprocess.run"), redirect_stdout(StringIO()):
+            with patch("scout_usage_tracker.github_billing._run_gh") as network, patch("scout_usage_tracker.cli.subprocess.run"), patch("scout_usage_tracker.cli.os.startfile", create=True), redirect_stdout(StringIO()):
                 for command in ("update", "render", "status"):
                     self.assertIn(main(["--config", str(config_path), command]), (0, 2))
                 self.assertEqual(main(["--config", str(config_path), "open"]), 0)

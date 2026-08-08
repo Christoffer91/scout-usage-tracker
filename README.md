@@ -21,19 +21,17 @@ Use a local **Codex**, **Claude Code**, or **GitHub Copilot** agent on the compu
 Install or update Scout Usage Tracker from:
 https://github.com/Christoffer91/scout-usage-tracker
 
-Work locally. Read README.md, install.sh, uninstall.sh, and config.example.json first.
-Verify Python 3.10+ with sqlite3 and check that ~/.scout/copilot/session-store.db exists.
+Work locally. Read README.md, the platform installer/uninstaller, and config.example.json first.
+Verify Python 3.10+ with sqlite3 and check that Scout's local session-store.db exists.
 
 Privacy and safety:
 - Open Scout's database read-only; never print, upload, modify, or copy it into the repository.
 - Do not use sudo or enable background updates, session reporting, billing sync, or price overrides without asking.
 - Preserve any existing config and history database.
 
-Run the repository tests and privacy checks. Use ./install.sh install for a new install or
-./install.sh update for an existing one. Then run:
-~/.local/bin/scout-usage status
-~/.local/bin/scout-usage update
-~/.local/bin/scout-usage open
+Run the repository tests and privacy checks. On Windows use install.ps1; on macOS/POSIX use
+install.sh. Use the install action for a new install or update for an existing one, then run
+the installed launcher's status, update, and open commands.
 
 Report PASS/FAIL, the dashboard location, and warnings without exposing private usage values.
 ```
@@ -51,7 +49,32 @@ Report PASS/FAIL, the dashboard location, and warnings without exposing private 
 
 ## Install manually
 
-Requirements: Python 3.10+ with SQLite and a local Scout database at `~/.scout/copilot/session-store.db`.
+Requirements: Python 3.10+ with SQLite and a local Scout database (`%USERPROFILE%\.scout\copilot\session-store.db` on Windows or `~/.scout/copilot/session-store.db` on macOS/POSIX).
+
+### Windows (ARM64 or x64 OS)
+
+Use native Windows PowerShell 5.1 from a normal, non-administrator prompt:
+
+```powershell
+git clone https://github.com/Christoffer91/scout-usage-tracker.git
+Set-Location scout-usage-tracker
+.\install.ps1 install
+.\install.ps1 status
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" update
+.\install.ps1 open
+```
+
+The default Windows layout is `%USERPROFILE%\.local\share\scout-usage-tracker` for the runtime, `%USERPROFILE%\.local\bin\scout-usage.cmd` for the launcher, and `%USERPROFILE%\.config\scout-usage-tracker\config.json` for configuration. The installer requires no administrator access, PATH changes, scheduled tasks, or background service.
+
+To update later:
+
+```powershell
+git pull --ff-only
+.\install.ps1 update
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" update
+```
+
+### macOS/POSIX
 
 ```sh
 git clone https://github.com/Christoffer91/scout-usage-tracker.git
@@ -62,7 +85,7 @@ ${HOME}/.local/bin/scout-usage update
 ${HOME}/.local/bin/scout-usage open
 ```
 
-The installer uses no `sudo`, preserves existing config/history, installs under your home directory, and creates no background job by default.
+Both installers preserve existing config/history, install under the current user profile/home, and create no background job by default. The POSIX installer uses no `sudo`.
 
 To update later:
 
@@ -80,6 +103,12 @@ Install the local skill explicitly:
 ./install.sh update --install-scout-skill
 ```
 
+On Windows:
+
+```powershell
+.\install.ps1 update -InstallScoutSkill
+```
+
 Start a new Scout conversation if needed, then use:
 
 ```text
@@ -90,9 +119,16 @@ Start a new Scout conversation if needed, then use:
 /cost all chats this week     # all local chats this ISO week
 /cost all chats this month    # all local chats this month
 /cost FAQ                     # complete usage guide
+/cost open                    # open the local dashboard with the native launcher
 ```
 
-English is the default; Norwegian requests return Norwegian output. `/cost` reports usage before the command itself and keeps the current chat as the default scope. It shows rounded credits for readability, model-level gross estimates, and a short clickable **Usage tracker** link to the configured local dashboard.
+English is the default; Norwegian requests return Norwegian output. `/cost` reports usage before the command itself and keeps the current chat as the default scope. It shows rounded credits for readability, model-level gross estimates, a short clickable **Usage tracker** link, and preserves the full final invitation to use `/cost FAQ`.
+
+Scout on Windows blocks private `file://` links outside its active workspace. On Windows, the installed skill therefore asks the tracker
+for an on-demand `http://127.0.0.1` link. It is protected by a random capability token, serves only the
+self-contained dashboard, writes no access log, and stops after the first successful dashboard fetch or five
+minutes. It never listens on an external interface and is not a scheduled task, service, or persistent background
+job. `/cost open` remains a native-launcher fallback if the short-lived link expires or cannot be started. macOS/POSIX keeps its existing direct local dashboard link and does not start the loopback viewer for normal `/cost` reports.
 
 The command never prints prompts, responses, raw session IDs, database paths, or token details. Calendar and automation surfaces sometimes omit `SESSION_ID`; the tracker fails closed unless exactly one uniquely fresh local session can be identified.
 
@@ -119,7 +155,7 @@ It never stores or sends:
 - Scout source paths or source row IDs;
 - telemetry or external analytics.
 
-Runtime directories use mode `0700`; private files use `0600`. Dashboard values are HTML-escaped and protected by a strict Content Security Policy.
+On POSIX, runtime directories use mode `0700` and private files use `0600`. Windows does not pretend POSIX `chmod` supplies ACL protection; its installer instead canonicalizes managed paths, refuses reparse points, and requires them to remain strictly below the current user profile. Dashboard values are HTML-escaped and protected by a strict Content Security Policy.
 
 Chat reporting is off by default. If enabled, drill-downs use local contextual labels such as `Chat-1`; they are not Scout titles or stable identities. Scout exposes no supported read-only API for its visible chat names, so the tracker does not decrypt or infer them.
 
@@ -143,7 +179,7 @@ Paths, billing overrides, promotional allowances, and organization pools remain 
 
 ## Optional GitHub billing snapshot
 
-Normal tracker commands make no network requests. `github-sync` is the only explicit billing read and uses an existing authenticated `gh` CLI session:
+Normal tracker commands make no external network requests. The `/cost` skill's explicitly documented loopback viewer is local-only; `github-sync` is the only explicit billing read and uses an existing authenticated `gh` CLI session:
 
 ```sh
 ${HOME}/.local/bin/scout-usage github-sync --scope user --owner YOUR_LOGIN
@@ -188,7 +224,19 @@ ${HOME}/.local/bin/scout-usage update
 
 ## Uninstall
 
-Preserve config, history, and reports:
+Windows preserves config, history, dashboard, secret, and logs by default:
+
+```powershell
+.\uninstall.ps1
+```
+
+Remove only the explicit tracker-owned data manifest:
+
+```powershell
+.\uninstall.ps1 -PurgeData
+```
+
+On macOS/POSIX, preserve config, history, and reports:
 
 ```sh
 ./install.sh uninstall
@@ -203,6 +251,10 @@ Remove tracker-owned data too:
 ```
 
 Only enumerated tracker-owned paths are removed; unsafe or unowned locations are refused.
+
+## Windows verification status
+
+Windows support was tested on an ARM64 Windows OS with native ARM64 Windows PowerShell 5.1. An official, checksum-verified portable CPython 3.13.13 ARM64 build (64-bit) with SQLite 3.50.4 ran the original 104-test Windows-support suite successfully, with 11 skips: eight because POSIX `sh` was unavailable and three because the embeddable package lacked IANA timezone data. CPython 3.11.9 AMD64 with SQLite 3.45.1 ran that suite successfully under x64 emulation, with eight POSIX `sh` skips. The later loopback hyperlink and `/cost FAQ` footer change ran the expanded 108-test suite under AMD64 Python on the ARM64 host, with eight POSIX `sh` skips; that incremental change was not rerun with native ARM64 Python. The default Windows local timezone and DST behavior are verified; when timezone data is unavailable, an explicitly configured IANA timezone fails with actionable guidance. Physical x64 Windows hardware, PowerShell 7, the macOS lifecycle, and the actual Scout in-app hyperlink click remain unverified. The loopback viewer itself was exercised through the installed runtime with synthetic HTML. The safe Windows `os.startfile` construction and error handling are unit-tested. Automatic refresh remains macOS-only.
 
 ## Verify the calculation
 

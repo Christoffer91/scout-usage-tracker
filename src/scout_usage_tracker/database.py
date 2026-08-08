@@ -6,6 +6,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from .platform_support import secure_chmod
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS usage_versions (
   source_event_key TEXT NOT NULL,
@@ -51,7 +53,7 @@ def connect_history(path: str | Path) -> sqlite3.Connection:
     parent_existed = target.parent.exists()
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not parent_existed:
-        os.chmod(target.parent, 0o700)
+        secure_chmod(target.parent, 0o700)
     connection = sqlite3.connect(target)
     connection.row_factory = sqlite3.Row
     connection.executescript(SCHEMA)
@@ -69,4 +71,4 @@ def secure_history_files(path: str | Path) -> None:
     target = Path(path)
     for candidate in (target, Path(str(target) + "-wal"), Path(str(target) + "-shm")):
         if candidate.exists():
-            os.chmod(candidate, 0o600)
+            secure_chmod(candidate, 0o600)

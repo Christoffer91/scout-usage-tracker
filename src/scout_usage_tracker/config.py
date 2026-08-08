@@ -9,7 +9,8 @@ import tempfile
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from .platform_support import TimezoneDataError, secure_chmod, timezone_for
 
 SCHEMA_VERSION = 3
 LEGACY_KEYS = {
@@ -102,11 +103,10 @@ def validate_config(data: dict[str, Any], config_path: Path) -> dict[str, Any]:
         details = "; ".join(" = ".join(labels) for labels in collisions)
         raise ConfigError(f"config, source, history, and dashboard paths must not alias: {details}")
     timezone = result.get("timezone", "local")
-    if timezone != "local":
-        try:
-            ZoneInfo(timezone)
-        except ZoneInfoNotFoundError as exc:
-            raise ConfigError(f"unknown IANA timezone: {timezone}") from exc
+    try:
+        timezone_for(timezone)
+    except TimezoneDataError as exc:
+        raise ConfigError(str(exc)) from exc
     result["timezone"] = timezone
     language = str(result.get("language", "en")).lower().replace("_", "-")
     if not (language.startswith("en") or language.startswith("nb") or language.startswith("no")):
@@ -208,16 +208,16 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
     parent_existed = path.parent.exists()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not parent_existed:
-        os.chmod(path.parent, 0o700)
+        secure_chmod(path.parent, 0o700)
     old_mode = ((path.stat().st_mode & 0o777) & mode) if path.exists() else mode
     old_mode = old_mode or mode
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(temporary, old_mode)
+        secure_chmod(temporary, old_mode)
         os.replace(temporary, path)
     except Exception:
         try:
@@ -240,14 +240,14 @@ def load_config(path: str | Path, write_migration: bool = True) -> dict[str, Any
     if changed and write_migration:
         atomic_write(config_path, json.dumps(migrated, indent=2, sort_keys=True) + "\n")
     else:
-        os.chmod(config_path, 0o600)
+        secure_chmod(config_path, 0o600)
     return validated
 
 
 def ensure_secret(runtime_dir: str | Path) -> bytes:
     directory = Path(runtime_dir).expanduser()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(directory, 0o700)
+    secure_chmod(directory, 0o700)
     path = directory / "hmac-secret"
     if not path.exists():
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -256,7 +256,7 @@ def ensure_secret(runtime_dir: str | Path) -> bytes:
             os.write(fd, secrets.token_bytes(32).hex().encode("ascii"))
         finally:
             os.close(fd)
-    os.chmod(path, 0o600)
+    secure_chmod(path, 0o600)
     try:
         secret = bytes.fromhex(path.read_text(encoding="ascii"))
     except (OSError, ValueError) as exc:

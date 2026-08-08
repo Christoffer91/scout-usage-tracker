@@ -3,8 +3,17 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from scout_usage_tracker.cost_report import CostReportError, build_cost_report, format_cost_faq, format_cost_report
+
+
+def has_zone(name):
+    try:
+        ZoneInfo(name)
+        return True
+    except ZoneInfoNotFoundError:
+        return False
 
 
 def details(nano: int) -> str:
@@ -48,7 +57,7 @@ class CostReportTests(unittest.TestCase):
             add_event(source, "c", "current", 2, 600_000_000, "2026-08-07T09:01:00Z", model="gpt-5.6-luna", input_tokens=3_000)
             add_event(source, "current-cost", "current", 3, 9_000_000_000, "2026-08-07T09:02:00Z")
             add_event(source, "other", "other", 1, 3_000_000_000, "2026-08-07T09:03:00Z")
-            report = build_cost_report(source, "current", "Europe/Oslo", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
+            report = build_cost_report(source, "current", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
             self.assertEqual((report.last_answer.total_nano_aiu, report.last_answer.model_calls), (2_000_000_000, 2))
             self.assertEqual((report.thread.total_nano_aiu, report.thread.model_calls), (2_600_000_000, 3))
             self.assertEqual(report.thread.input_tokens, 6_000)
@@ -112,7 +121,8 @@ class CostReportTests(unittest.TestCase):
             self.assertIn("GPT-5.6 Luna-delen: ca. **USD 0,01 / NOK 0**", output)
             self.assertNotIn("Uten pris", output)
             self.assertIn("Scout-only", output)
-            self.assertIn("`/cost FAQ`", output)
+            self.assertIn('"/cost FAQ"', output)
+            self.assertTrue(output.rstrip().endswith('Vil du vite hvordan du bruker /cost til flere oppgaver? Skriv "/cost FAQ".'))
 
     def test_period_titles(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -149,9 +159,15 @@ class CostReportTests(unittest.TestCase):
             self.assertIn("Scout-credits**  \nInput:", output)
             self.assertIn("tokens**  \nOutput:", output)
             self.assertIn("Sjekk", output)
+            self.assertTrue(output.rstrip().endswith('Vil du vite hvordan du bruker /cost til flere oppgaver? Skriv "/cost FAQ".'))
             self.assertNotIn("Slik bruker du `/cost`", output)
             self.assertNotIn("AIU-kontroll", output)
             self.assertNotIn("ikke en faktura", output)
+
+            english = format_cost_report(report, dashboard_uri=uri)
+            self.assertTrue(english.rstrip().endswith('Want to learn more ways to use /cost? Type "/cost FAQ".'))
+            self.assertTrue(english.rstrip().splitlines()[-1].isascii())
+            self.assertNotIn("�", english)
 
     def test_invalid_json_and_mismatch_statuses(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -163,6 +179,7 @@ class CostReportTests(unittest.TestCase):
             connection.execute("UPDATE assistant_usage_events SET token_details_json=? WHERE id='bad-json'", (details(2),)); connection.commit(); connection.close()
             self.assertEqual(build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc)).thread.integrity, "failed")
 
+    @unittest.skipUnless(has_zone("Europe/Oslo"), "IANA timezone data is unavailable")
     def test_dst_day_boundaries_are_transition_aware(self):
         cases = (
             (datetime(2026, 3, 29, 12, tzinfo=timezone.utc), "2026-03-28T23:00:00Z", "2026-03-29T22:00:00Z"),

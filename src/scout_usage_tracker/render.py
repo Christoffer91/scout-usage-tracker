@@ -18,6 +18,7 @@ from .config import atomic_write
 from .database import connect_history, secure_history_files
 from .history import active_events, latest_run
 from .pricing import estimate_costs
+from .platform_support import secure_chmod
 
 MODEL_COLORS = ("#008a00", "#7bc87a", "#ba8e6b", "#ec7a2e", "#8a9499", "#33a133")
 
@@ -573,5 +574,5 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
         document = document.replace("{{" + key + "}}", value)
     target = Path(config["dashboard_path"])
     atomic_write(target, document, 0o600)
-    os.chmod(target, 0o600)
+    secure_chmod(target, 0o600)
     return target
