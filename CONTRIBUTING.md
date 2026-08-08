@@ -36,4 +36,4 @@ Do not use GitHub Actions as an iterative debugging loop. Run relevant checks lo
 - Currency values remain clearly labeled estimates.
 - New opt-ins must default to disabled and be documented.
 
-By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+Please keep discussions constructive, respectful, and focused on improving the project.
