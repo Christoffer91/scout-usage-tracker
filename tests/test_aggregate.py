@@ -1,7 +1,16 @@
 import unittest
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from scout_usage_tracker.aggregate import aggregate, drilldown_records
+
+
+def has_zone(name):
+    try:
+        ZoneInfo(name)
+        return True
+    except ZoneInfoNotFoundError:
+        return False
 
 
 def row(at, model="m", nano=10, session="a" * 64):
@@ -12,6 +21,7 @@ def row(at, model="m", nano=10, session="a" * 64):
 
 
 class AggregateTests(unittest.TestCase):
+    @unittest.skipUnless(has_zone("America/New_York"), "IANA timezone data is unavailable")
     def test_dst_local_day_and_iso_week_year(self):
         result = aggregate([
             row("2024-12-30T05:30:00+00:00"),

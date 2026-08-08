@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from decimal import Decimal, ROUND_HALF_UP
 from html import escape
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import quote
-from zoneinfo import ZoneInfo
 
 from .aggregate import local_zone
+from .platform_support import sqlite_readonly_uri
 from .pricing import credits_from_nano, estimate_costs, verification
 
 
@@ -120,7 +119,7 @@ def _utc_text(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _bounds(day: date, zone: ZoneInfo) -> dict[str, tuple[datetime, datetime]]:
+def _bounds(day: date, zone: tzinfo) -> dict[str, tuple[datetime, datetime]]:
     day_start = datetime.combine(day, time.min, zone)
     week_start = day_start - timedelta(days=day.weekday())
     month_start = datetime(day.year, day.month, 1, tzinfo=zone)
@@ -167,12 +166,10 @@ def build_cost_report(
         raise CostReportError("Scout usage database was not found")
 
     zone = local_zone(timezone_name)
-    if not isinstance(zone, ZoneInfo):
-        raise CostReportError("configure an IANA timezone (for example Europe/Oslo) before using /cost")
     current = now or datetime.now(timezone.utc)
     period_bounds = _bounds(current.astimezone(zone).date(), zone)
 
-    uri = "file:" + quote(str(source.resolve()), safe="/") + "?mode=ro"
+    uri = sqlite_readonly_uri(source)
     try:
         connection = sqlite3.connect(uri, uri=True, timeout=1.0, isolation_level=None)
         connection.row_factory = sqlite3.Row
@@ -408,12 +405,12 @@ def format_cost_report(
         lines.extend(["", "Dette er Scout-only og inkluderer ikke GitHub Copilot-appen eller andre Copilot-klienter."])
         if safe_link:
             lines.append(f"Sjekk {safe_link} for detaljer og historikk.")
-        lines.extend(["", "Vil du vite hvordan du bruker `/cost` til flere oppgaver? Skriv “`/cost FAQ`”."])
+        lines.extend(["", 'Vil du vite hvordan du bruker /cost til flere oppgaver? Skriv "/cost FAQ".'])
     else:
         lines.extend(["", "This is Scout-only and excludes the GitHub Copilot app and other Copilot clients."])
         if safe_link:
             lines.append(f"Check {safe_link} for details and history.")
-        lines.extend(["", "Want to learn more ways to use `/cost`? Type “`/cost FAQ`”."])
+        lines.extend(["", 'Want to learn more ways to use /cost? Type "/cost FAQ".'])
     # Scout surfaces do not consistently preserve Markdown soft line breaks.
     # Emit explicit hard breaks so metrics and per-model estimates remain one item per line.
     return "\n".join(f"{line}  " if line else "" for line in lines)

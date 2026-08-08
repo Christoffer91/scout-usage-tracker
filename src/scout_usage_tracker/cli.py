@@ -1,4 +1,4 @@
-"""Command-line interface; no server and no network access."""
+"""Command-line interface with optional loopback-only dashboard viewing."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .config import ConfigError, ensure_secret, load_config
 from .cost_report import CostReportError, build_cost_report, format_cost_faq, format_cost_report
+from .dashboard_server import start_dashboard_viewer
 from .import_usage import import_usage
 from .render import render_dashboard
 from .source import read_source
@@ -67,6 +68,7 @@ def command_cost(
     scope: str = "chat",
     language: str | None = None,
     faq: bool = False,
+    dashboard_link: str = "file",
 ) -> int:
     selected_language = language or config.get("language", "en")
     if faq:
@@ -75,7 +77,11 @@ def command_cost(
     session_id = os.environ.get("SESSION_ID", "")
     report = build_cost_report(config["source_database"], session_id, config["timezone"])
     selected_period = period or ("all" if scope == "all" else "thread")
-    dashboard_uri = Path(config["dashboard_path"]).expanduser().resolve(strict=False).as_uri()
+    dashboard = Path(config["dashboard_path"]).expanduser()
+    if dashboard_link == "loopback":
+        dashboard_uri = start_dashboard_viewer(dashboard, _runtime_dir(config))
+    else:
+        dashboard_uri = dashboard.resolve(strict=False).as_uri()
     print(format_cost_report(
         report,
         selected_period,
@@ -94,12 +100,16 @@ def command_open(config: dict) -> int:
     if not target.is_file():
         print("Dashboard is missing; run update first.", file=sys.stderr)
         return 2
-    system = platform.system()
-    command = ["open", str(target)] if system == "Darwin" else (["cmd", "/c", "start", "", str(target)] if system == "Windows" else ["xdg-open", str(target)])
+    system = "Windows" if os.name == "nt" else platform.system()
     try:
-        subprocess.run(command, check=True)
-    except (OSError, subprocess.CalledProcessError) as exc:
-        print(f"Could not open dashboard: {exc}", file=sys.stderr)
+        if system == "Windows":
+            startfile = getattr(os, "startfile")
+            startfile(str(target.resolve()))
+        else:
+            command = ["open", str(target)] if system == "Darwin" else ["xdg-open", str(target)]
+            subprocess.run(command, check=True, shell=False)
+    except (AttributeError, OSError, subprocess.CalledProcessError):
+        print("Could not open dashboard.", file=sys.stderr)
         return 2
     return 0
 
@@ -135,6 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     cost.add_argument("--scope", choices=("chat", "all"), default="chat")
     cost.add_argument("--language", choices=("en", "nb"))
     cost.add_argument("--faq", action="store_true", help="show the /cost usage guide without reading usage data")
+    cost.add_argument(
+        "--dashboard-link", choices=("file", "loopback"), default="file",
+        help="use a short-lived, localhost-only dashboard link for constrained chat clients",
+    )
     current = datetime.now(timezone.utc)
     sync = commands.add_parser("github-sync", help="explicitly fetch aggregate GitHub billing usage through gh")
     sync.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
@@ -156,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             return command_status(config)
         if args.command == "cost":
-            return command_cost(config, args.period, args.scope, args.language, args.faq)
+            return command_cost(config, args.period, args.scope, args.language, args.faq, args.dashboard_link)
         if args.command == "github-sync":
             return command_github_sync(config, args.scope, args.owner, args.year, args.month)
         return command_open(config)

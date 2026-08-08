@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -39,7 +40,8 @@ class GitHubBillingTests(unittest.TestCase):
             self.assertIn("product=Copilot", argv)
             self.assertFalse(kwargs["shell"])
             self.assertEqual(kwargs["timeout"], 20)
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             stored = json.loads(path.read_text())
             self.assertNotIn("fictional-user", path.read_text())
             self.assertNotIn("timePeriod", stored)

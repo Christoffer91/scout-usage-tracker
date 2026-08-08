@@ -1,5 +1,7 @@
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LifecyclePrivacyTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_shell_syntax_and_install_permissions_and_opt_in(self):
         subprocess.run(["sh", "-n", str(ROOT / "install.sh"), str(ROOT / "uninstall.sh")], check=True)
         with tempfile.TemporaryDirectory() as temporary:
@@ -18,8 +21,9 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertIn("Installed Scout Usage Tracker", completed.stdout)
             config = home / ".config/scout-usage-tracker/config.json"
             runtime = home / ".local/share/scout-usage-tracker"
-            self.assertEqual(config.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
+            if os.name != "nt":
+                self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(runtime.stat().st_mode & 0o777, 0o700)
             self.assertFalse((home / "Library/LaunchAgents/local.scout-usage-tracker.plist").exists())
             self.assertFalse((home / ".scout/m-skills/cost").exists())
             self.assertFalse((home / ".copilot/m-skills/cost").exists())
@@ -27,6 +31,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertTrue(config.exists())
             self.assertTrue(runtime.exists())
 
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_installer_rejects_unsafe_override_before_mutation(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"
@@ -38,6 +43,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertIn("strictly under HOME", completed.stderr)
             self.assertFalse(outside.exists())
 
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_installer_rejects_nested_managed_roots_before_mutation(self):
         cases = (
             {"SCOUT_USAGE_CONFIG_DIR": ".local/share/scout-usage-tracker/src/scout-usage-tracker"},
@@ -59,6 +65,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
                 self.assertEqual(list(home.iterdir()), [])
                 self.assertFalse(any(home.rglob(".scout-usage-tracker-owned")))
 
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_unknown_option_leaves_home_empty(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
@@ -67,6 +74,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 2)
             self.assertEqual(list(home.iterdir()), [])
 
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_unowned_roots_and_skill_are_not_overwritten(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
@@ -111,6 +119,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertEqual(skill_file.read_text(), "unowned")
             self.assertFalse((home / ".local").exists())
 
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_scout_cost_skill_is_explicit_owned_and_uninstalled(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
@@ -129,6 +138,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertFalse(skill.exists())
             self.assertFalse(portable.exists())
 
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_purge_removes_only_enumerated_owned_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
@@ -139,6 +149,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
             subprocess.run(["sh", str(ROOT / "install.sh"), "uninstall", "--purge-data"], env=env, check=True, capture_output=True)
             self.assertEqual(sentinel.read_text(), "keep")
 
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_installer_rejects_python_older_than_310(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -156,7 +167,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
     def test_synthetic_check_does_not_rewrite_committed_example(self):
         dashboard = ROOT / "examples/synthetic-dashboard.html"
         before = (dashboard.read_bytes(), dashboard.stat().st_mtime_ns)
-        completed = subprocess.run(["python3", str(ROOT / "scripts/generate_synthetic.py"), "--check"], check=True, text=True, capture_output=True,
+        completed = subprocess.run([sys.executable, str(ROOT / "scripts/generate_synthetic.py"), "--check"], check=True, text=True, capture_output=True,
                                    env={**os.environ, "PYTHONPATH": str(ROOT / "src")})
         after = (dashboard.read_bytes(), dashboard.stat().st_mtime_ns)
         self.assertEqual(before, after)

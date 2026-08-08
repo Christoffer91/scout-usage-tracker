@@ -9,6 +9,7 @@ from decimal import Decimal
 from io import StringIO
 from html import unescape
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from scout_usage_tracker.config import ConfigError, load_config
 from scout_usage_tracker.cli import command_update
@@ -16,6 +17,14 @@ from scout_usage_tracker.import_usage import import_usage
 from scout_usage_tracker.render import _calendar_window, _credits, _daily_chart, _display_datetime, _money_total, render_dashboard
 
 from tests.helpers import event, make_source
+
+
+def has_zone(name):
+    try:
+        ZoneInfo(name)
+        return True
+    except ZoneInfoNotFoundError:
+        return False
 
 
 class ConfigRenderTests(unittest.TestCase):
@@ -36,7 +45,8 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertEqual(config["language"], "en")
         self.assertEqual(config["usd_per_credit"], "0.01")
         self.assertTrue(config["privacy"]["include_sessions"])
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_actual_legacy_pricing_and_account_snapshot_migrate(self):
         path = self.root / "config.json"
@@ -118,7 +128,7 @@ class ConfigRenderTests(unittest.TestCase):
                   "account_comparison": {"total": "<b>bad</b>", "additional_usage_usd": "<img src=x>", "scope": "account-wide/manual", "as_of": "fictional"},
                   "_generated_at": "2025-01-01T00:00:00+00:00"}
         render_dashboard(config)
-        text = dashboard.read_text()
+        text = dashboard.read_text(encoding="utf-8")
         self.assertIn("&lt;script&gt;alert", text)
         self.assertNotIn('<script>alert("x")</script>', text)
         self.assertNotIn("raw-secret-session", text)
@@ -131,15 +141,16 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("&lt;img src=x&gt;", text)
         self.assertIn("never Scout-only", text)
         self.assertIn("<strong>Verified</strong>", text)
-        self.assertEqual(dashboard.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(dashboard.stat().st_mode & 0o777, 0o600)
 
     def test_sessions_are_omitted_by_default(self):
         source = self.root / "source.sqlite3"; history = self.root / "history.sqlite3"; dashboard = self.root / "dashboard.html"
         make_source(source, [event()]); import_usage(source, history, b"y" * 32)
         render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
                           "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None})
-        self.assertNotIn("By anonymized chat", dashboard.read_text())
-        self.assertNotIn(">By chats</button>", dashboard.read_text())
+        self.assertNotIn("By anonymized chat", dashboard.read_text(encoding="utf-8"))
+        self.assertNotIn(">By chats</button>", dashboard.read_text(encoding="utf-8"))
 
     def test_redesigned_dashboard_is_self_contained_and_accessible(self):
         source = self.root / "source.sqlite3"; history = self.root / "history.sqlite3"; dashboard = self.root / "dashboard.html"
@@ -147,7 +158,7 @@ class ConfigRenderTests(unittest.TestCase):
         render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
                           "privacy": {"include_sessions": False},
                           "usd_per_credit_by_model": {"example-model": "0.1"}, "usd_to_nok": "10"})
-        text = dashboard.read_text()
+        text = dashboard.read_text(encoding="utf-8")
         self.assertIn("default-src 'none'", text)
         self.assertIn('id="theme-toggle"', text)
         self.assertIn('aria-pressed="false"', text)
@@ -218,7 +229,7 @@ class ConfigRenderTests(unittest.TestCase):
             "history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
             "privacy": {"include_sessions": True}, "usd_per_credit_by_model": {}, "usd_to_nok": None,
         })
-        text = dashboard.read_text()
+        text = dashboard.read_text(encoding="utf-8")
         match = re.search(r'data-filter-data="([^"]+)"', text)
         self.assertIsNotNone(match)
         payload = json.loads(unescape(match.group(1)))
@@ -248,7 +259,7 @@ class ConfigRenderTests(unittest.TestCase):
                           "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": "10",
                           "billing": {"enabled": True, "plan": "pro", "snapshot_path": str(snapshot)},
                           "_generated_at": "2026-08-06T12:00:00Z"})
-        text = dashboard.read_text()
+        text = dashboard.read_text(encoding="utf-8")
         self.assertIn("Plan &amp; billing estimates", text)
         self.assertIn("1,500 monthly credits", text)
         self.assertIn("catalog dated 2026-08-06", text)
@@ -265,7 +276,7 @@ class ConfigRenderTests(unittest.TestCase):
         render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
                           "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None,
                           "billing": {"enabled": True, "plan": "business"}, "_generated_at": "2026-08-06T12:00:00Z"})
-        text = dashboard.read_text()
+        text = dashboard.read_text(encoding="utf-8")
         self.assertIn("1,900 per seat, pooled", text)
         self.assertIn("USD 19 per user/seat per month", text)
         self.assertIn("no user overage is estimated", text)
@@ -282,7 +293,7 @@ class ConfigRenderTests(unittest.TestCase):
             "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None,
             "billing": {"enabled": True, "plan": "unknown"}, "_generated_at": "2026-08-06T12:00:00Z",
         })
-        text = dashboard.read_text()
+        text = dashboard.read_text(encoding="utf-8")
         self.assertIn('Estimated cost</span><strong data-money-total>USD 25', text)
         self.assertIn('<small data-money-note>estimate, not a bill</small>', text)
         self.assertNotIn("— · AI-credit estimate", text)
@@ -308,6 +319,7 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertEqual(_money_total(Decimal("283.5504"), "USD"), "USD 284")
         self.assertEqual(_money_total(Decimal("2639.30"), "NOK"), "NOK 2,639")
 
+    @unittest.skipUnless(has_zone("Europe/Oslo"), "IANA timezone data is unavailable")
     def test_visible_dates_are_human_readable_and_local(self):
         self.assertEqual(_display_datetime("2026-08-05T12:01:08.565Z", "Europe/Oslo"), "5 Aug 2026, 14:01")
         self.assertEqual(_display_datetime("2026-02-03", "UTC"), "3 Feb 2026")
@@ -340,7 +352,7 @@ class ConfigRenderTests(unittest.TestCase):
             import_usage(source, history, b"z" * 32)
             render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
                               "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": None})
-            text = dashboard.read_text()
+            text = dashboard.read_text(encoding="utf-8")
             self.assertIn("<strong>Review recommended</strong>", text)
             self.assertNotIn(f"<strong>{expected}</strong>", text)
             self.assertNotIn("Status counts", text)
@@ -360,8 +372,8 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertTrue(output.getvalue().startswith("INCOMPLETE "))
         self.assertIn("skipped=1", output.getvalue())
         self.assertIn("possible_gap=false", output.getvalue())
-        self.assertIn("<strong>Review recommended</strong>", dashboard.read_text())
-        self.assertNotIn("<strong>INCOMPLETE</strong>", dashboard.read_text())
+        self.assertIn("<strong>Review recommended</strong>", dashboard.read_text(encoding="utf-8"))
+        self.assertNotIn("<strong>INCOMPLETE</strong>", dashboard.read_text(encoding="utf-8"))
 
     def test_gap_only_makes_render_and_cli_incomplete(self):
         source = self.root / "gap-source.sqlite3"
@@ -377,8 +389,8 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertTrue(output.getvalue().startswith("INCOMPLETE "))
         self.assertIn("skipped=0", output.getvalue())
         self.assertIn("possible_gap=true", output.getvalue())
-        self.assertIn("<strong>Review recommended</strong>", dashboard.read_text())
-        self.assertNotIn("<strong>INCOMPLETE</strong>", dashboard.read_text())
+        self.assertIn("<strong>Review recommended</strong>", dashboard.read_text(encoding="utf-8"))
+        self.assertNotIn("<strong>INCOMPLETE</strong>", dashboard.read_text(encoding="utf-8"))
 
     def test_cli_pass_is_reserved_for_fully_verified_events(self):
         for name, total, expected in (("verified", 20, "PASS "), ("mismatch", 21, "INCOMPLETE ")):

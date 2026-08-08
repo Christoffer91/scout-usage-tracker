@@ -6,7 +6,8 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote
+
+from .platform_support import sqlite_readonly_uri
 
 REQUIRED_COLUMNS = {
     "id", "session_id", "model", "input_tokens", "output_tokens",
@@ -29,7 +30,7 @@ def read_source(path: str | Path, timeout: float = 0.25) -> SourceResult:
         return SourceResult("missing", [], "source database does not exist")
     if not os.access(source, os.R_OK):
         return SourceResult("permission", [], "source database is not readable")
-    uri = f"file:{quote(str(source.resolve()), safe='/')}?mode=ro"
+    uri = sqlite_readonly_uri(source)
     connection = None
     try:
         connection = sqlite3.connect(uri, uri=True, timeout=timeout)

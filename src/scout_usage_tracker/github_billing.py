@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .billing import BillingError, decimal_value, normalize_plan, validate_snapshot
+from .platform_support import secure_chmod
 
 API_VERSION = "2026-03-10"
 TIMEOUT_SECONDS = 20
@@ -123,7 +124,7 @@ def _write_snapshot(path: Path, snapshot: dict[str, Any]) -> None:
     parent_existed = path.parent.exists()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not parent_existed:
-        os.chmod(path.parent, 0o700)
+        secure_chmod(path.parent, 0o700)
     text = json.dumps(snapshot, indent=2, sort_keys=True, default=str) + "\n"
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -131,7 +132,7 @@ def _write_snapshot(path: Path, snapshot: dict[str, Any]) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(temporary, 0o600)
+        secure_chmod(temporary, 0o600)
         os.replace(temporary, path)
     except Exception:
         try:

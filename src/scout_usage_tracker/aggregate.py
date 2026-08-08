@@ -5,33 +5,19 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
-import os
-from pathlib import Path
 from typing import Any, Iterable
-from zoneinfo import ZoneInfo
 
+from .platform_support import TimezoneDataError, timezone_for
 from .pricing import credits_from_nano
 from .privacy import session_label
 
 
 def local_zone(name: str):
-    if name == "local":
-        configured = os.environ.get("TZ")
-        if configured:
-            try:
-                return ZoneInfo(configured)
-            except Exception:
-                pass
-        localtime = Path("/etc/localtime")
-        try:
-            marker = "/zoneinfo/"
-            resolved = str(localtime.resolve())
-            if marker in resolved:
-                return ZoneInfo(resolved.split(marker, 1)[1])
-        except OSError:
-            pass
-        return datetime.now().astimezone().tzinfo
-    return ZoneInfo(name)
+    try:
+        return timezone_for(name)
+    except TimezoneDataError as exc:
+        from .config import ConfigError
+        raise ConfigError(str(exc)) from exc
 
 
 def _blank() -> dict[str, int]:
