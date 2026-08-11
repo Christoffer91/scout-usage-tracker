@@ -92,20 +92,20 @@ def timezone_for(name: str) -> tzinfo:
             if configured:
                 try:
                     return ZoneInfo(configured)
-                except ZoneInfoNotFoundError:
+                except (ZoneInfoNotFoundError, ValueError):
                     pass
             try:
                 resolved = str(Path("/etc/localtime").resolve())
                 if "/zoneinfo/" in resolved:
                     return ZoneInfo(resolved.split("/zoneinfo/", 1)[1])
-            except (OSError, ZoneInfoNotFoundError):
+            except (OSError, ZoneInfoNotFoundError, ValueError):
                 pass
         return SYSTEM_LOCAL_TIMEZONE
     if name.upper() in {"UTC", "ETC/UTC", "ETC/GMT", "GMT"}:
         return timezone.utc
     try:
         return ZoneInfo(name)
-    except ZoneInfoNotFoundError as exc:
+    except (ZoneInfoNotFoundError, ValueError) as exc:
         raise TimezoneDataError(
             f"IANA timezone data is unavailable for {name!r}; install timezone data or use local"
         ) from exc

@@ -14,18 +14,18 @@ Never show the selected launcher path in the response. Treat the current chat as
 
 ```text
 # Windows PowerShell
-& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope chat --period thread --dashboard-link loopback
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --scope chat --period thread --language en --dashboard-link loopback
 # macOS/POSIX
-${HOME}/.local/bin/scout-usage cost --scope chat --period thread
+${HOME}/.local/bin/scout-usage cost --scope chat --period thread --language en
 ```
 
 For `/cost FAQ` or an equivalent help request, return only the usage guide. This command does not read usage data:
 
 ```text
 # Windows PowerShell
-& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --faq
+& "$env:USERPROFILE\.local\bin\scout-usage.cmd" cost --faq --language en
 # macOS/POSIX
-${HOME}/.local/bin/scout-usage cost --faq
+${HOME}/.local/bin/scout-usage cost --faq --language en
 ```
 
 For `/cost open`, `open usage tracker`, or an equivalent request, open the generated dashboard through the
@@ -76,11 +76,9 @@ Interpret equivalent natural-language phrases, including follow-ups. For example
 
 ## Language
 
-- English is the default when the request contains no language signal.
-- For Norwegian requests, add `--language nb`.
-- For English requests, add `--language en` or use the configured default.
-- For another language, run the English command, translate only headings and explanatory prose into the user's language, and preserve every number, model name, unit, scope, integrity state, and caveat exactly.
-- Return command output without adding inferred usage or billing claims.
+- Bare `/cost` and bare `/cost FAQ` always use `--language en`, regardless of the configured default.
+- When the user explicitly requests Norwegian, add `--language nb`; when the user explicitly requests English, add `--language en`.
+- Return command stdout verbatim. Do not translate, reformat, summarize, shorten, or add inferred usage or billing claims.
 - Preserve the command output's final `/cost FAQ` invitation verbatim, including its ASCII quotation marks. It is part of every normal report and must never be reformatted, summarized, shortened, or omitted.
 
 The command uses Scout's active `SESSION_ID` when available. Calendar and automation surfaces may omit it; the tracker then accepts only one uniquely freshest local usage session within a strict time window. It reports usage before the current request, so the usage of the `/cost` response itself appears next time.

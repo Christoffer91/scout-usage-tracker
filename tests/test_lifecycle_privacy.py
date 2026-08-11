@@ -11,6 +11,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class LifecyclePrivacyTests(unittest.TestCase):
+    def test_cost_skill_bare_commands_are_english_and_stdout_is_verbatim(self):
+        skill = (ROOT / "skills/cost/SKILL.md").read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("cost --scope chat --period thread --language en --dashboard-link loopback", skill)
+        self.assertIn("cost --scope chat --period thread --language en", skill)
+        self.assertIn("cost --faq --language en", skill)
+        self.assertIn("Bare `/cost` and bare `/cost FAQ` always use `--language en`", skill)
+        self.assertIn("Return command stdout verbatim", skill)
+        self.assertNotIn("translate only headings", skill)
+        self.assertNotIn("starts no web server", readme)
+        self.assertIn("starts no persistent or externally listening server", readme)
+        self.assertIn("bounded `127.0.0.1` viewer", readme)
+
     @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_shell_syntax_and_install_permissions_and_opt_in(self):
         subprocess.run(["sh", "-n", str(ROOT / "install.sh"), str(ROOT / "uninstall.sh")], check=True)

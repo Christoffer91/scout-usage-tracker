@@ -35,6 +35,9 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
+if ($PurgeData -and $Action -ne "uninstall") { Fail "-PurgeData is valid only with uninstall." 2 }
+if ($InstallScoutSkill -and $Action -notin @("install", "update")) { Fail "-InstallScoutSkill is valid only with install or update." 2 }
+
 function Env-OrDefault([string]$Name, [string]$DefaultValue) {
     $value = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($value)) { return $DefaultValue }
@@ -52,8 +55,12 @@ if ([string]::IsNullOrWhiteSpace($ProfileRoot) -or $ProfileRoot -eq [IO.Path]::G
 $InstallRoot = Get-CanonicalPath (Env-OrDefault "SCOUT_USAGE_INSTALL_ROOT" (Join-Path $ProfileRoot ".local\share\scout-usage-tracker"))
 $BinRoot = Get-CanonicalPath (Env-OrDefault "SCOUT_USAGE_BIN_DIR" (Join-Path $ProfileRoot ".local\bin"))
 $ConfigRoot = Get-CanonicalPath (Env-OrDefault "SCOUT_USAGE_CONFIG_DIR" (Join-Path $ProfileRoot ".config\scout-usage-tracker"))
-$ScoutSkillRoot = Get-CanonicalPath (Env-OrDefault "SCOUT_COST_SKILL_DIR" (Join-Path $ProfileRoot ".scout\m-skills\cost"))
-$CopilotSkillRoot = Get-CanonicalPath (Env-OrDefault "COPILOT_COST_SKILL_DIR" (Join-Path $ProfileRoot ".copilot\m-skills\cost"))
+$ScoutSkillRoot = $null
+$CopilotSkillRoot = $null
+if ($Action -eq "uninstall" -or $InstallScoutSkill) {
+    $ScoutSkillRoot = [IO.Path]::GetFullPath((Env-OrDefault "SCOUT_COST_SKILL_DIR" (Join-Path $ProfileRoot ".scout\m-skills\cost")))
+    $CopilotSkillRoot = [IO.Path]::GetFullPath((Env-OrDefault "COPILOT_COST_SKILL_DIR" (Join-Path $ProfileRoot ".copilot\m-skills\cost")))
+}
 $Launcher = Join-Path $BinRoot "scout-usage.cmd"
 $LauncherMarker = Join-Path $BinRoot "scout-usage.cmd.scout-usage-tracker-owned"
 $ConfigPath = Join-Path $ConfigRoot "config.json"
@@ -80,25 +87,70 @@ function Assert-NoReparsePoint([string]$PathValue) {
     }
 }
 
-$ManagedRoots = @($InstallRoot, $BinRoot, $ConfigRoot, $ScoutSkillRoot, $CopilotSkillRoot)
-foreach ($pathValue in $ManagedRoots) {
-    $managed = $pathValue.TrimEnd('\')
-    $project = $ProjectRoot.TrimEnd('\')
-    if ($managed.Equals($project, [StringComparison]::OrdinalIgnoreCase) -or
-        $managed.StartsWith($project + '\', [StringComparison]::OrdinalIgnoreCase) -or
-        $project.StartsWith($managed + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        Fail "Unsafe managed path: managed paths must not overlap the source package."
+function Test-SkillPathContainsReparsePoint([string]$PathValue) {
+    Assert-BelowProfile $PathValue
+    $relative = $PathValue.Substring($ProfileRoot.Length).TrimStart('\')
+    $current = $ProfileRoot
+    foreach ($part in $relative.Split([char]'\', [StringSplitOptions]::RemoveEmptyEntries)) {
+        $current = Join-Path $current $part
+        try {
+            if (-not (Test-Path -LiteralPath $current -ErrorAction Stop)) { continue }
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        } catch {
+            return $true
+        }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+    }
+    return $false
+}
+
+function Test-PathsOverlapLexically([string]$Left, [string]$Right) {
+    $a = $Left.TrimEnd('\')
+    $b = $Right.TrimEnd('\')
+    return ($a.Equals($b, [StringComparison]::OrdinalIgnoreCase) -or
+        $a.StartsWith($b + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        $b.StartsWith($a + '\', [StringComparison]::OrdinalIgnoreCase))
+}
+
+function Assert-SkillRootsDoNotOverlapCoreDeletionPaths {
+    $coreDeletionPaths = @(
+        $Launcher, $LauncherMarker,
+        (Join-Path $InstallRoot "src"), (Join-Path $InstallRoot "templates"),
+        (Join-Path $InstallRoot "skills"), (Join-Path $InstallRoot "config.example.json")
+    )
+    if ($PurgeData) {
+        $coreDeletionPaths += @($InstallRoot, $ConfigRoot, $ConfigPath)
+    }
+    foreach ($skillRoot in @($ScoutSkillRoot, $CopilotSkillRoot)) {
+        Assert-BelowProfile $skillRoot
+        foreach ($corePath in $coreDeletionPaths) {
+            if (Test-PathsOverlapLexically $skillRoot $corePath) {
+                Fail "Unsafe managed paths: skill roots must not overlap core deletion paths."
+            }
+        }
     }
 }
-foreach ($pathValue in $ManagedRoots) { Assert-NoReparsePoint $pathValue }
-for ($left = 0; $left -lt $ManagedRoots.Count; $left++) {
-    for ($right = $left + 1; $right -lt $ManagedRoots.Count; $right++) {
-        $a = $ManagedRoots[$left].TrimEnd('\')
-        $b = $ManagedRoots[$right].TrimEnd('\')
-        if ($a.Equals($b, [StringComparison]::OrdinalIgnoreCase) -or
-            $a.StartsWith($b + '\', [StringComparison]::OrdinalIgnoreCase) -or
-            $b.StartsWith($a + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            Fail "Unsafe managed paths: managed roots must be pairwise disjoint."
+
+function Assert-ManagedRoots([string[]]$Roots) {
+    foreach ($pathValue in $Roots) {
+        $managed = $pathValue.TrimEnd('\')
+        $project = $ProjectRoot.TrimEnd('\')
+        if ($managed.Equals($project, [StringComparison]::OrdinalIgnoreCase) -or
+            $managed.StartsWith($project + '\', [StringComparison]::OrdinalIgnoreCase) -or
+            $project.StartsWith($managed + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            Fail "Unsafe managed path: managed paths must not overlap the source package."
+        }
+        Assert-NoReparsePoint $pathValue
+    }
+    for ($left = 0; $left -lt $Roots.Count; $left++) {
+        for ($right = $left + 1; $right -lt $Roots.Count; $right++) {
+            $a = $Roots[$left].TrimEnd('\')
+            $b = $Roots[$right].TrimEnd('\')
+            if ($a.Equals($b, [StringComparison]::OrdinalIgnoreCase) -or
+                $a.StartsWith($b + '\', [StringComparison]::OrdinalIgnoreCase) -or
+                $b.StartsWith($a + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                Fail "Unsafe managed paths: managed roots must be pairwise disjoint."
+            }
         }
     }
 }
@@ -125,12 +177,89 @@ function Assert-LauncherOwnedOrAbsent {
     }
 }
 
-Assert-OwnedDirectoryOrAbsent $InstallRoot
-Assert-OwnedDirectoryOrAbsent $ConfigRoot
-Assert-LauncherOwnedOrAbsent
-if ($InstallScoutSkill -or $Action -eq "uninstall") {
-    Assert-OwnedDirectoryOrAbsent $ScoutSkillRoot
-    Assert-OwnedDirectoryOrAbsent $CopilotSkillRoot
+function Assert-DeletionTreeSafe([string]$PathValue) {
+    if (-not (Test-Path -LiteralPath $PathValue)) { return }
+    Assert-NoReparsePoint $PathValue
+    $pending = New-Object System.Collections.Generic.Stack[string]
+    $pending.Push($PathValue)
+    while ($pending.Count -gt 0) {
+        $current = $pending.Pop()
+        $item = Get-Item -LiteralPath $current -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Fail "Refusing managed path containing a reparse point."
+        }
+        if ($item.PSIsContainer) {
+            foreach ($child in Get-ChildItem -LiteralPath $current -Force) {
+                $pending.Push($child.FullName)
+            }
+        }
+    }
+}
+
+function Assert-DeletionFileSafe([string]$PathValue) {
+    if (-not (Test-Path -LiteralPath $PathValue)) { return }
+    Assert-DeletionTreeSafe $PathValue
+    if ((Get-Item -LiteralPath $PathValue -Force).PSIsContainer) {
+        Fail "Refusing to remove a directory through the file manifest."
+    }
+}
+
+function Get-OwnedSkillDeletionRoots {
+    $owned = New-Object System.Collections.Generic.List[string]
+    foreach ($root in @($ScoutSkillRoot, $CopilotSkillRoot)) {
+        Assert-BelowProfile $root
+        if (Test-SkillPathContainsReparsePoint $root) { continue }
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        $item = Get-Item -LiteralPath $root -Force
+        if (-not $item.PSIsContainer) { continue }
+        $marker = Join-Path $root $OwnerMarkerName
+        if (Test-Path -LiteralPath $marker -PathType Leaf) { $owned.Add($root) | Out-Null }
+    }
+    return $owned.ToArray()
+}
+
+function Assert-UninstallPreflight([string[]]$OwnedSkillRoots) {
+    $uninstallRoots = @($InstallRoot, $BinRoot, $ConfigRoot) + $OwnedSkillRoots
+    Assert-ManagedRoots $uninstallRoots
+    Assert-OwnedDirectoryOrAbsent $InstallRoot
+    Assert-OwnedDirectoryOrAbsent $ConfigRoot
+    Assert-LauncherOwnedOrAbsent
+    foreach ($root in $OwnedSkillRoots) { Assert-OwnedDirectoryOrAbsent $root }
+
+    if (Test-Path -LiteralPath $LauncherMarker -PathType Leaf) {
+        Assert-DeletionFileSafe $Launcher
+        Assert-DeletionFileSafe $LauncherMarker
+    }
+    if (Test-Path -LiteralPath (Join-Path $InstallRoot $OwnerMarkerName) -PathType Leaf) {
+        foreach ($name in @("src", "templates", "skills")) {
+            Assert-DeletionTreeSafe (Join-Path $InstallRoot $name)
+        }
+        Assert-DeletionFileSafe (Join-Path $InstallRoot "config.example.json")
+    }
+    foreach ($root in $OwnedSkillRoots) { Assert-DeletionTreeSafe $root }
+    if ($PurgeData) {
+        foreach ($name in @("history.sqlite3", "history.sqlite3-wal", "history.sqlite3-shm", "dashboard.html", "hmac-secret", "refresh.log", "billing-snapshot.json", $OwnerMarkerName)) {
+            Assert-DeletionFileSafe (Join-Path $InstallRoot $name)
+        }
+        Assert-DeletionFileSafe $ConfigPath
+        Assert-DeletionFileSafe (Join-Path $ConfigRoot $OwnerMarkerName)
+    }
+}
+
+if ($Action -in @("install", "update")) {
+    $InstallRoots = @($InstallRoot, $BinRoot, $ConfigRoot)
+    if ($InstallScoutSkill) { $InstallRoots += @($ScoutSkillRoot, $CopilotSkillRoot) }
+    Assert-ManagedRoots $InstallRoots
+    Assert-OwnedDirectoryOrAbsent $InstallRoot
+    Assert-OwnedDirectoryOrAbsent $ConfigRoot
+    Assert-LauncherOwnedOrAbsent
+    if ($InstallScoutSkill) {
+        Assert-OwnedDirectoryOrAbsent $ScoutSkillRoot
+        Assert-OwnedDirectoryOrAbsent $CopilotSkillRoot
+    }
+} elseif ($Action -in @("status", "open")) {
+    Assert-ManagedRoots @($BinRoot)
+    Assert-LauncherOwnedOrAbsent
 }
 
 function Resolve-Python {
@@ -225,18 +354,15 @@ function Remove-FileIfPresent([string]$PathValue) {
     }
 }
 
-function Remove-OwnedSkill([string]$Target) {
-    $marker = Join-Path $Target $OwnerMarkerName
-    if (Test-Path -LiteralPath $marker -PathType Leaf) { Remove-ProgramTree $Target }
-}
-
 function Uninstall-Program {
+    Assert-SkillRootsDoNotOverlapCoreDeletionPaths
+    $ownedSkillRoots = @(Get-OwnedSkillDeletionRoots)
+    Assert-UninstallPreflight $ownedSkillRoots
     if (Test-Path -LiteralPath $LauncherMarker -PathType Leaf) {
         Remove-FileIfPresent $Launcher
         Remove-FileIfPresent $LauncherMarker
     }
-    Remove-OwnedSkill $ScoutSkillRoot
-    Remove-OwnedSkill $CopilotSkillRoot
+    foreach ($root in $ownedSkillRoots) { Remove-ProgramTree $root }
     if (Test-Path -LiteralPath (Join-Path $InstallRoot $OwnerMarkerName) -PathType Leaf) {
         foreach ($name in @("src", "templates", "skills")) { Remove-ProgramTree (Join-Path $InstallRoot $name) }
         Remove-FileIfPresent (Join-Path $InstallRoot "config.example.json")
@@ -257,9 +383,6 @@ function Uninstall-Program {
         Write-Output "Uninstalled program; preserved config, history, secret, dashboard, logs, and ownership markers."
     }
 }
-
-if ($PurgeData -and $Action -ne "uninstall") { Fail "-PurgeData is valid only with uninstall." 2 }
-if ($InstallScoutSkill -and $Action -notin @("install", "update")) { Fail "-InstallScoutSkill is valid only with install or update." 2 }
 
 switch ($Action) {
     "install" { Install-Program }
