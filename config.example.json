@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "source_database": "~/.scout/copilot/session-store.db",
   "history_database": "~/.local/share/scout-usage-tracker/history.sqlite3",
   "dashboard_path": "~/.local/share/scout-usage-tracker/dashboard.html",
@@ -10,7 +10,7 @@
   },
   "usd_per_credit": "0.01",
   "usd_per_credit_by_model": {},
-  "usd_to_nok": null,
+  "secondary_currency": null,
   "billing": {
     "enabled": false,
     "plan": "unknown",

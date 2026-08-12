@@ -43,8 +43,12 @@ Privacy and safety:
 Run the repository tests and privacy checks before installation.
 
 For a new installation:
-- Windows: run .\install.ps1 install -InstallScoutSkill.
-- macOS: run ./install.sh install --install-scout-skill.
+- Ask whether estimates should show USD only (default) or an optional secondary currency.
+- For a secondary currency, ask for its three-letter code and the manual rate: 1 USD equals X.
+- Windows USD only: run .\install.ps1 install -InstallScoutSkill -UsdOnly.
+- Windows secondary currency example: .\install.ps1 install -InstallScoutSkill -Currency EUR -UsdRate 0.92.
+- macOS USD only: run ./install.sh install --install-scout-skill --usd-only.
+- macOS secondary currency example: ./install.sh install --install-scout-skill --currency EUR --usd-rate 0.92.
 
 For an existing tracker-owned installation, use the equivalent update action with the same skill
 option. Preserve existing configuration, history, optional settings, and dashboard location.
@@ -161,7 +165,7 @@ credits = Decimal(total_nano_aiu) / 1,000,000,000
 
 **GitHub Copilot totals are account-wide.** They can combine Scout with other Copilot clients, devices, and apps. The tracker never treats an Admin or billing total as Scout-only usage.
 
-**USD/NOK values are estimates, not bills.** GitHub defines one AI credit as USD 0.01. Included plan credits can make the billed amount lower or zero. Scout's token pricing is already reflected in exact nano-AIU; see GitHub's current [model pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) and [Copilot plans](https://docs.github.com/en/copilot/get-started/plans-for-github-copilot).
+**Currency values are estimates, not bills.** USD is shown by default. A secondary currency is optional and uses the user's manually supplied conversion rate; the tracker never fetches exchange rates. GitHub defines one AI credit as USD 0.01. Included plan credits can make the billed amount lower or zero. Scout's token pricing is already reflected in exact nano-AIU; see GitHub's current [model pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) and [Copilot plans](https://docs.github.com/en/copilot/get-started/plans-for-github-copilot).
 
 ## Privacy
 
@@ -190,11 +194,35 @@ Common settings:
 | `language` | `/cost` language; default `en`, Norwegian `nb` |
 | `privacy.include_sessions` | Enables anonymized chat drill-downs; default `false` |
 | `usd_per_credit` | Gross USD estimate; default `0.01` |
-| `usd_to_nok` | Optional manually supplied exchange rate |
+| `secondary_currency` | Optional code and manual rate (`1 USD = X`); `null` means USD only |
 | `billing.*` | Optional plan context and private aggregate snapshot |
 | `account_comparison` | Optional manual account-wide comparison |
 
 Paths, billing overrides, promotional allowances, and organization pools remain explicit configuration. Missing or unknown values display `—`; they are not guessed.
+
+The installers ask about currency only for a new interactive installation. Press Enter for USD only, or provide a code such as `NOK`, `EUR`, or `GBP` and a manual rate. Agent-driven and automated installs should pass an explicit option:
+
+```sh
+./install.sh install --usd-only
+./install.sh install --currency EUR --usd-rate 0.92
+```
+
+```powershell
+.\install.ps1 install -UsdOnly
+.\install.ps1 install -Currency EUR -UsdRate 0.92
+```
+
+Existing installations keep their current selection. The old `usd_to_nok` setting migrates automatically to a NOK secondary currency.
+
+Change it later with the installed launcher:
+
+```sh
+${HOME}/.local/bin/scout-usage configure-currency --usd-only
+${HOME}/.local/bin/scout-usage configure-currency --code GBP --usd-rate 0.79
+${HOME}/.local/bin/scout-usage render
+```
+
+On Windows, use `%USERPROFILE%\.local\bin\scout-usage.cmd` with the same arguments.
 
 ## Optional GitHub billing snapshot
 

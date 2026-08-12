@@ -4,6 +4,9 @@ param(
     [ValidateSet("install", "update", "status", "open", "uninstall")]
     [string]$Action = "install",
     [switch]$InstallScoutSkill,
+    [string]$Currency,
+    [string]$UsdRate,
+    [switch]$UsdOnly,
     [switch]$PurgeData
 )
 
@@ -37,6 +40,9 @@ function Fail([string]$Message, [int]$Code = 1) {
 
 if ($PurgeData -and $Action -ne "uninstall") { Fail "-PurgeData is valid only with uninstall." 2 }
 if ($InstallScoutSkill -and $Action -notin @("install", "update")) { Fail "-InstallScoutSkill is valid only with install or update." 2 }
+if ($UsdOnly -and (-not [string]::IsNullOrWhiteSpace($Currency) -or -not [string]::IsNullOrWhiteSpace($UsdRate))) { Fail "-UsdOnly cannot be combined with -Currency or -UsdRate." 2 }
+if (([string]::IsNullOrWhiteSpace($Currency)) -xor ([string]::IsNullOrWhiteSpace($UsdRate))) { Fail "-Currency and -UsdRate are required together." 2 }
+if (($UsdOnly -or $Currency) -and $Action -notin @("install", "update")) { Fail "Currency options are valid only with install or update." 2 }
 
 function Env-OrDefault([string]$Name, [string]$DefaultValue) {
     $value = [Environment]::GetEnvironmentVariable($Name)
@@ -318,6 +324,26 @@ function Install-Skill([string]$Target, [string]$Label) {
 
 function Install-Program {
     $Python = Resolve-Python
+    $ConfigWasPresent = Test-Path -LiteralPath $ConfigPath
+    $SelectedCurrency = $Currency
+    $SelectedRate = $UsdRate
+    $SelectedUsdOnly = $UsdOnly
+    if (-not $ConfigWasPresent) {
+        if (-not $SelectedUsdOnly -and [string]::IsNullOrWhiteSpace($SelectedCurrency) -and -not [Console]::IsInputRedirected) {
+            $SelectedCurrency = Read-Host "Optional secondary currency code (press Enter for USD only, for example NOK or EUR)"
+            if ([string]::IsNullOrWhiteSpace($SelectedCurrency)) { $SelectedUsdOnly = $true }
+            else { $SelectedRate = Read-Host "Manual rate (1 USD equals how many $SelectedCurrency?)" }
+        }
+        if (-not $SelectedUsdOnly -and -not [string]::IsNullOrWhiteSpace($SelectedCurrency)) {
+            $SelectedCurrency = $SelectedCurrency.ToUpperInvariant()
+            if ($SelectedCurrency -notmatch '^[A-Z]{3}$' -or $SelectedCurrency -eq "USD") {
+                Fail "Currency code must be three letters other than USD."
+            }
+            [decimal]$ParsedRate = 0
+            $ValidRate = [decimal]::TryParse($SelectedRate, [Globalization.NumberStyles]::Number, [Globalization.CultureInfo]::InvariantCulture, [ref]$ParsedRate)
+            if (-not $ValidRate -or $ParsedRate -le 0) { Fail "Currency rate must be a positive finite number." }
+        }
+    }
     New-OwnedDirectory $InstallRoot
     New-OwnedDirectory $ConfigRoot
     [IO.Directory]::CreateDirectory($BinRoot) | Out-Null
@@ -337,6 +363,21 @@ function Install-Program {
     $launcherText = "@echo off`r`nsetlocal`r`nset `"PYTHONPATH=$batchSource`"`r`n`"$batchPython`" -m scout_usage_tracker --config `"$batchConfig`" %*`r`nexit /b %ERRORLEVEL%`r`n"
     Write-Utf8 $Launcher $launcherText
     Write-Utf8 $LauncherMarker "owned by Scout Usage Tracker`r`n"
+
+    if (-not $ConfigWasPresent) {
+        $PreviousPythonPath = $env:PYTHONPATH
+        try {
+            $env:PYTHONPATH = Join-Path $InstallRoot "src"
+            if ($SelectedUsdOnly -or [string]::IsNullOrWhiteSpace($SelectedCurrency)) {
+                & $Python -m scout_usage_tracker --config $ConfigPath configure-currency --usd-only | Out-Null
+            } else {
+                & $Python -m scout_usage_tracker --config $ConfigPath configure-currency --code $SelectedCurrency --usd-rate $SelectedRate | Out-Null
+            }
+            if ($LASTEXITCODE -ne 0) { Fail "Currency configuration failed." }
+        } finally {
+            $env:PYTHONPATH = $PreviousPythonPath
+        }
+    }
 
     if ($InstallScoutSkill) {
         Install-Skill $ScoutSkillRoot "Scout"

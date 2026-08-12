@@ -334,7 +334,9 @@ def _filter_payload(
             "groups": groups,
             "estimated_usd": None if model_prices.get(label) is None else str(model_prices[label]),
         })
-    usd_to_nok = config.get("usd_to_nok")
+    secondary = config.get("secondary_currency")
+    if secondary is None and config.get("usd_to_nok") is not None:
+        secondary = {"code": "NOK", "usd_rate": config["usd_to_nok"]}
     money_mode = "none"
     if models and all(model["estimated_usd"] is not None for model in models):
         money_mode = "model"
@@ -354,7 +356,10 @@ def _filter_payload(
         "money": {
             "mode": money_mode,
             "usd_per_credit": "0.01" if money_mode == "credit" else None,
-            "usd_to_nok": None if usd_to_nok is None else str(usd_to_nok),
+            "secondary_currency": None if secondary is None else {
+                "code": secondary["code"],
+                "usd_rate": str(secondary["usd_rate"]),
+            },
         },
     }
     return _escape(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
@@ -382,8 +387,8 @@ def _billing_card(
     if summary["monthly_price_usd"] is not None:
         price += " per user/seat per month" if summary["pooled"] else " / month"
     gross_row = f"<dt>Estimated gross Scout value</dt><dd>{_escape(_money_total(summary['estimated_gross_scout_usd'], 'USD'))}"
-    if summary["estimated_gross_scout_nok"] is not None:
-        gross_row += f" · {_escape(_money_total(summary['estimated_gross_scout_nok'], 'NOK'))}"
+    if summary["estimated_gross_scout_secondary"] is not None:
+        gross_row += f" · {_escape(_money_total(summary['estimated_gross_scout_secondary'], summary['secondary_currency_code']))}"
     gross_row += " · estimate, not an invoice</dd>"
     if not summary["enabled"]:
         rows = []
@@ -430,8 +435,8 @@ def _billing_card(
         rows.append(f"<dt>Net usage amount</dt><dd>{_escape(_money(snapshot['net_amount_usd'], 'USD'))} · {_escape(net_label)}</dd>")
         if summary["estimated_additional_credits"] is not None:
             extra = f"{_credits(summary['estimated_additional_credits'])} credits · {_money(summary['estimated_additional_usd'], 'USD')}"
-            if summary["estimated_additional_nok"] is not None:
-                extra += f" · {_money(summary['estimated_additional_nok'], 'NOK')}"
+            if summary["estimated_additional_secondary"] is not None:
+                extra += f" · {_money(summary['estimated_additional_secondary'], summary['secondary_currency_code'])}"
             rows.append(f"<dt>Estimated additional usage</dt><dd>{_escape(extra)} · estimate, not an invoice</dd>")
         elif summary["pooled"]:
             note = "Business and Enterprise allowances are billing-entity pools; this tracker never allocates a pool share to one user."
@@ -472,7 +477,7 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
     estimates = estimate_costs(
         credits_by_model,
         config.get("usd_per_credit_by_model", {}),
-        config.get("usd_to_nok"),
+        config.get("secondary_currency", config.get("usd_to_nok")),
         default_rate=config.get("usd_per_credit", "0.01"),
     )
     model_prices = estimates["per_model_usd"]
@@ -527,8 +532,8 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
     money_kpi = ""
     if estimates["total_usd"] is not None:
         estimate_note = "estimate, not a bill"
-        if estimates["total_nok"] is not None:
-            estimate_note = f'{_escape(_money_total(estimates["total_nok"], "NOK"))} · {estimate_note}'
+        if estimates["total_secondary"] is not None:
+            estimate_note = f'{_escape(_money_total(estimates["total_secondary"], estimates["secondary_currency_code"]))} · {estimate_note}'
         money_kpi = (
             '<div class="hero-kpi" data-money-kpi><span>Estimated cost</span>'
             f'<strong data-money-total>{_escape(_money_total(estimates["total_usd"], "USD"))}</strong>'
@@ -536,8 +541,8 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
         )
     elif billing["estimated_gross_scout_usd"] is not None:
         estimate_note = "AI-credit estimate, not a bill"
-        if billing["estimated_gross_scout_nok"] is not None:
-            estimate_note = f'{_escape(_money_total(billing["estimated_gross_scout_nok"], "NOK"))} · {estimate_note}'
+        if billing["estimated_gross_scout_secondary"] is not None:
+            estimate_note = f'{_escape(_money_total(billing["estimated_gross_scout_secondary"], billing["secondary_currency_code"]))} · {estimate_note}'
         money_kpi = (
             '<div class="hero-kpi" data-money-kpi><span>Estimated gross Scout value</span>'
             f'<strong data-money-total>{_escape(_money_total(billing["estimated_gross_scout_usd"], "USD"))}</strong>'

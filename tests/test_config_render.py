@@ -41,10 +41,11 @@ class ConfigRenderTests(unittest.TestCase):
         path.chmod(0o640)
         config = load_config(path)
         migrated = json.loads(path.read_text())
-        self.assertEqual(migrated["schema_version"], 3)
+        self.assertEqual(migrated["schema_version"], 4)
         self.assertEqual(config["language"], "en")
         self.assertEqual(config["usd_per_credit"], "0.01")
         self.assertTrue(config["privacy"]["include_sessions"])
+        self.assertIsNone(config["secondary_currency"])
         if os.name != "nt":
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
@@ -74,6 +75,25 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertEqual(config["usd_per_credit"], "0.01")
         for key, value in (("language", "fr"), ("usd_per_credit", "NaN"), ("usd_per_credit", "-1")):
             path.write_text(json.dumps({**base, key: value}), encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(path)
+
+    def test_secondary_currency_validation_and_legacy_nok_migration(self):
+        path = self.root / "config.json"
+        base = {"source_database": "source.db", "history_database": "history.db", "dashboard_path": "dash.html"}
+        path.write_text(json.dumps({**base, "schema_version": 3, "usd_to_nok": "10.25"}), encoding="utf-8")
+        config = load_config(path)
+        self.assertEqual(config["secondary_currency"], {"code": "NOK", "usd_rate": "10.25"})
+        migrated = json.loads(path.read_text())
+        self.assertNotIn("usd_to_nok", migrated)
+        self.assertEqual(migrated["schema_version"], 4)
+        for value in (
+            {"code": "EU", "usd_rate": "1"},
+            {"code": "USD", "usd_rate": "1"},
+            {"code": "EUR", "usd_rate": "0"},
+            {"code": "EUR", "usd_rate": "NaN"},
+        ):
+            path.write_text(json.dumps({**base, "secondary_currency": value}), encoding="utf-8")
             with self.assertRaises(ConfigError):
                 load_config(path)
 
@@ -157,7 +177,8 @@ class ConfigRenderTests(unittest.TestCase):
         make_source(source, [event(model="example-model")]); import_usage(source, history, b"u" * 32)
         render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
                           "privacy": {"include_sessions": False},
-                          "usd_per_credit_by_model": {"example-model": "0.1"}, "usd_to_nok": "10"})
+                          "usd_per_credit_by_model": {"example-model": "0.1"},
+                          "secondary_currency": {"code": "EUR", "usd_rate": "0.9"}})
         text = dashboard.read_text(encoding="utf-8")
         self.assertIn("default-src 'none'", text)
         self.assertIn('id="theme-toggle"', text)
@@ -178,6 +199,7 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("value / scale.cap * 72", text)
         self.assertIn("Math.log1p((value - scale.cap) / scale.cap)", text)
         self.assertIn("30-day credit trend with a compressed scale above", text)
+        self.assertIn('"secondary_currency":{"code":"EUR","usd_rate":"0.9"}', unescape(text))
         self.assertIn("30-day trend · compressed above", text)
         self.assertIn('data-model-card', text)
         self.assertIn('data-donut', text)
@@ -267,7 +289,8 @@ class ConfigRenderTests(unittest.TestCase):
             "discount_amount_usd": "15", "net_amount_usd": "2",
         }), encoding="utf-8")
         render_dashboard({"history_database": str(history), "dashboard_path": str(dashboard), "timezone": "UTC",
-                          "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {}, "usd_to_nok": "10",
+                          "privacy": {"include_sessions": False}, "usd_per_credit_by_model": {},
+                          "secondary_currency": {"code": "EUR", "usd_rate": "0.9"},
                           "billing": {"enabled": True, "plan": "pro", "snapshot_path": str(snapshot)},
                           "_generated_at": "2026-08-06T12:00:00Z"})
         text = dashboard.read_text(encoding="utf-8")
@@ -278,7 +301,7 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("Current billing month", text)
         self.assertIn("Estimated gross Scout value", text)
         self.assertIn("GitHub-reported usage amount; not a final invoice", text)
-        self.assertIn("200 credits · USD 2 · NOK 20", text)
+        self.assertIn("200 credits · USD 2 · EUR 1.8", text)
         self.assertNotIn("Enable billing and configure billing.plan", text)
 
     def test_pooled_card_does_not_estimate_user_overage(self):

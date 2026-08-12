@@ -995,9 +995,9 @@
     if (mode === 'credit') usd = credits(total) * Number(filterData.money.usd_per_credit || 0);
     if (usd == null) return;
     container.querySelector('[data-money-total]').textContent = `USD ${whole.format(usd)}`;
-    const nokRate = filterData.money.usd_to_nok == null ? null : Number(filterData.money.usd_to_nok);
-    const nok = nokRate == null ? '' : `NOK ${whole.format(usd * nokRate)} · `;
-    container.querySelector('[data-money-note]').textContent = `${nok}${mode === 'credit' ? 'AI-credit estimate, not a bill' : 'estimate, not a bill'}`;
+    const secondary = filterData.money.secondary_currency;
+    const converted = secondary == null ? '' : `${secondary.code} ${whole.format(usd * Number(secondary.usd_rate))} · `;
+    container.querySelector('[data-money-note]').textContent = `${converted}${mode === 'credit' ? 'AI-credit estimate, not a bill' : 'estimate, not a bill'}`;
   };
   function updateAll() {
     reserveDashboardHeight();

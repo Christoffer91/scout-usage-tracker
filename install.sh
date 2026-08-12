@@ -26,7 +26,7 @@ COPILOT_SKILL_MARKER="$COPILOT_SKILL_DIR/$OWNER_MARKER"
 LAUNCH_MARKER="$INSTALL_ROOT/.launchagent-installed"
 
 usage() {
-  echo "Usage: $0 {install|update|status|open|uninstall} [--enable-auto-update] [--install-skill] [--install-scout-skill] [--purge-data]"
+  echo "Usage: $0 {install|update|status|open|uninstall} [--enable-auto-update] [--install-skill] [--install-scout-skill] [--usd-only | --currency CODE --usd-rate RATE] [--purge-data]"
 }
 
 action=${1:-install}
@@ -35,6 +35,9 @@ enable_auto=false
 install_skill_flag=false
 install_scout_skill_flag=false
 purge=false
+currency_code=
+usd_rate=
+usd_only=false
 
 case "$action" in
   install|update)
@@ -43,6 +46,9 @@ case "$action" in
         --enable-auto-update) enable_auto=true ;;
         --install-skill) install_skill_flag=true ;;
         --install-scout-skill) install_scout_skill_flag=true ;;
+        --usd-only) usd_only=true ;;
+        --currency) shift; [ "$#" -gt 0 ] || { usage >&2; exit 2; }; currency_code=$1 ;;
+        --usd-rate) shift; [ "$#" -gt 0 ] || { usage >&2; exit 2; }; usd_rate=$1 ;;
         *) usage >&2; exit 2 ;;
       esac
       shift
@@ -62,6 +68,13 @@ case "$action" in
     ;;
   *) usage >&2; exit 2 ;;
 esac
+
+if [ "$usd_only" = true ] && { [ -n "$currency_code" ] || [ -n "$usd_rate" ]; }; then
+  echo "--usd-only cannot be combined with --currency or --usd-rate." >&2; exit 2
+fi
+if { [ -n "$currency_code" ] && [ -z "$usd_rate" ]; } || { [ -z "$currency_code" ] && [ -n "$usd_rate" ]; }; then
+  echo "--currency and --usd-rate are required together." >&2; exit 2
+fi
 
 if [ "$enable_auto" = true ] && [ "$(uname -s)" != "Darwin" ]; then
   echo "Automatic update is supported only on macOS." >&2
@@ -163,6 +176,45 @@ copy_program() {
   fi
   chmod 600 "$CONFIG_PATH" "$INSTALL_ROOT/config.example.json"
   write_launcher
+}
+
+select_currency() {
+  config_was_present=$1
+  if [ "$config_was_present" = true ]; then return; fi
+  if [ "$usd_only" = false ] && [ -z "$currency_code" ] && [ -t 0 ]; then
+    printf 'Optional secondary currency code (press Enter for USD only, for example NOK or EUR): '
+    IFS= read -r currency_code
+    if [ -n "$currency_code" ]; then
+      printf 'Manual rate (1 USD equals how many %s?): ' "$currency_code"
+      IFS= read -r usd_rate
+    else
+      usd_only=true
+    fi
+  fi
+  if [ "$usd_only" = false ] && [ -n "$currency_code" ]; then
+    python3 -c '
+import decimal, re, sys
+code = sys.argv[1].upper()
+if not re.fullmatch(r"[A-Z]{3}", code) or code == "USD":
+    raise SystemExit("Currency code must be three letters other than USD.")
+try:
+    rate = decimal.Decimal(sys.argv[2])
+except decimal.InvalidOperation:
+    raise SystemExit("Currency rate must be a positive finite number.")
+if not rate.is_finite() or rate <= 0:
+    raise SystemExit("Currency rate must be a positive finite number.")
+' "$currency_code" "$usd_rate"
+  fi
+}
+
+configure_currency() {
+  config_was_present=$1
+  if [ "$config_was_present" = true ]; then return; fi
+  if [ "$usd_only" = true ] || [ -z "$currency_code" ]; then
+    "$BIN_DIR/scout-usage" configure-currency --usd-only >/dev/null
+  else
+    "$BIN_DIR/scout-usage" configure-currency --code "$currency_code" --usd-rate "$usd_rate" >/dev/null
+  fi
 }
 
 check_scout_db() {
@@ -277,7 +329,11 @@ esac
 case "$action" in
   uninstall) do_uninstall ;;
   install|update)
+    config_was_present=false
+    [ ! -e "$CONFIG_PATH" ] || config_was_present=true
+    select_currency "$config_was_present"
     copy_program
+    configure_currency "$config_was_present"
     check_scout_db
     [ "$enable_auto" = false ] || enable_auto_update
     [ "$install_skill_flag" = false ] || install_skill

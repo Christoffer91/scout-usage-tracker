@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import tempfile
 from decimal import Decimal, InvalidOperation
@@ -12,7 +13,7 @@ from typing import Any
 
 from .platform_support import TimezoneDataError, secure_chmod, timezone_for
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 LEGACY_KEYS = {
     "sourceDatabase": "source_database",
     "historyDatabase": "history_database",
@@ -68,7 +69,15 @@ def _migrate(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             data.pop(presentation_key)
             changed = True
     version = data.get("schema_version", 0)
-    if version not in (0, 1, 2, SCHEMA_VERSION):
+    if "usd_to_nok" in data:
+        legacy_rate = data.pop("usd_to_nok")
+        if legacy_rate is not None and "secondary_currency" not in data:
+            data["secondary_currency"] = {"code": "NOK", "usd_rate": legacy_rate}
+        changed = True
+    if "secondary_currency" not in data:
+        data["secondary_currency"] = None
+        changed = True
+    if version not in (0, 1, 2, 3, SCHEMA_VERSION):
         raise ConfigError(f"unsupported config schema_version: {version}")
     if "language" not in data:
         data["language"] = "en"
@@ -127,13 +136,20 @@ def validate_config(data: dict[str, Any], config_path: Path) -> dict[str, Any]:
     if not usd_per_credit.is_finite() or usd_per_credit < 0:
         raise ConfigError("usd_per_credit must be a nonnegative finite number")
     result["usd_per_credit"] = str(usd_per_credit)
-    if result.get("usd_to_nok") is not None:
+    secondary = result.get("secondary_currency")
+    if secondary is not None:
+        if not isinstance(secondary, dict) or set(secondary) != {"code", "usd_rate"}:
+            raise ConfigError("secondary_currency must be null or contain code and usd_rate")
+        code = str(secondary.get("code", "")).upper()
+        if not re.fullmatch(r"[A-Z]{3}", code) or code == "USD":
+            raise ConfigError("secondary_currency.code must be a three-letter code other than USD")
         try:
-            exchange = Decimal(str(result["usd_to_nok"]))
+            exchange = Decimal(str(secondary.get("usd_rate")))
         except (InvalidOperation, TypeError, ValueError) as exc:
-            raise ConfigError("usd_to_nok must be a nonnegative finite number") from exc
-        if not exchange.is_finite() or exchange < 0:
-            raise ConfigError("usd_to_nok must be a nonnegative finite number")
+            raise ConfigError("secondary_currency.usd_rate must be a positive finite number") from exc
+        if not exchange.is_finite() or exchange <= 0:
+            raise ConfigError("secondary_currency.usd_rate must be a positive finite number")
+        result["secondary_currency"] = {"code": code, "usd_rate": str(exchange)}
     comparison = result.get("account_comparison")
     if comparison is not None and not isinstance(comparison, dict):
         raise ConfigError("account_comparison must be an object")
@@ -241,6 +257,25 @@ def load_config(path: str | Path, write_migration: bool = True) -> dict[str, Any
         atomic_write(config_path, json.dumps(migrated, indent=2, sort_keys=True) + "\n")
     else:
         secure_chmod(config_path, 0o600)
+    return validated
+
+
+def configure_secondary_currency(path: str | Path, code: str | None, usd_rate: str | None) -> dict[str, Any]:
+    """Set an optional display currency without changing usage or pricing data."""
+    config_path = Path(path).expanduser().resolve()
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ConfigError(f"cannot load config: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError("config root must be an object")
+    migrated, _ = _migrate(raw)
+    migrated["secondary_currency"] = None if code is None else {
+        "code": code.upper(),
+        "usd_rate": usd_rate,
+    }
+    validated = validate_config(migrated, config_path)
+    atomic_write(config_path, json.dumps(migrated, indent=2, sort_keys=True) + "\n")
     return validated
 
 
