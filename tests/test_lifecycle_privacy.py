@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,33 @@ class LifecyclePrivacyTests(unittest.TestCase):
             subprocess.run(["sh", str(ROOT / "install.sh"), "uninstall"], env=env, check=True, capture_output=True)
             self.assertTrue(config.exists())
             self.assertTrue(runtime.exists())
+
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
+    def test_new_install_currency_choice_and_update_preservation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            env = {**os.environ, "HOME": str(home)}
+            subprocess.run([
+                "sh", str(ROOT / "install.sh"), "install", "--currency", "EUR", "--usd-rate", "0.92",
+            ], env=env, check=True, capture_output=True)
+            config = home / ".config/scout-usage-tracker/config.json"
+            configured = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual(configured["secondary_currency"], {"code": "EUR", "usd_rate": "0.92"})
+            before = config.read_bytes()
+            subprocess.run([
+                "sh", str(ROOT / "install.sh"), "update", "--usd-only",
+            ], env=env, check=True, capture_output=True)
+            self.assertEqual(config.read_bytes(), before)
+
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
+    def test_invalid_currency_is_rejected_before_installation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            completed = subprocess.run([
+                "sh", str(ROOT / "install.sh"), "install", "--currency", "EU", "--usd-rate", "0",
+            ], env={**os.environ, "HOME": str(home)}, text=True, capture_output=True)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertEqual(list(home.iterdir()), [])
 
     @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_installer_rejects_unsafe_override_before_mutation(self):

@@ -159,8 +159,11 @@ def billing_summary(config: dict[str, Any], scout_credits: Decimal, *, now: date
     estimated_additional = None
     if snapshot and period_matches and scope_matches and effective_allowance is not None:
         estimated_additional = max(snapshot["gross_ai_credits"] - effective_allowance, Decimal(0))
-    usd_to_nok = config.get("usd_to_nok")
-    exchange = decimal_value(usd_to_nok, "usd_to_nok", optional=True)
+    secondary = config.get("secondary_currency")
+    if secondary is None and config.get("usd_to_nok") is not None:
+        secondary = {"code": "NOK", "usd_rate": config["usd_to_nok"]}
+    currency_code = secondary.get("code") if secondary else None
+    exchange = decimal_value(secondary.get("usd_rate"), "secondary_currency.usd_rate") if secondary else None
     gross_scout_usd = scout_credits * AI_CREDIT_USD if enabled else None
     additional_usd = estimated_additional * AI_CREDIT_USD if estimated_additional is not None else None
     return {
@@ -179,7 +182,10 @@ def billing_summary(config: dict[str, Any], scout_credits: Decimal, *, now: date
         "scope_matches": scope_matches,
         "estimated_additional_credits": estimated_additional,
         "estimated_additional_usd": additional_usd,
-        "estimated_additional_nok": additional_usd * exchange if additional_usd is not None and exchange is not None else None,
+        "secondary_currency_code": currency_code,
+        "estimated_additional_secondary": additional_usd * exchange if additional_usd is not None and exchange is not None else None,
+        "estimated_additional_nok": additional_usd * exchange if additional_usd is not None and currency_code == "NOK" else None,
         "estimated_gross_scout_usd": gross_scout_usd,
-        "estimated_gross_scout_nok": gross_scout_usd * exchange if gross_scout_usd is not None and exchange is not None else None,
+        "estimated_gross_scout_secondary": gross_scout_usd * exchange if gross_scout_usd is not None and exchange is not None else None,
+        "estimated_gross_scout_nok": gross_scout_usd * exchange if gross_scout_usd is not None and currency_code == "NOK" else None,
     }

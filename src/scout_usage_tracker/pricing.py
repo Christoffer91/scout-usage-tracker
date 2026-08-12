@@ -75,7 +75,7 @@ def verification(total_nano: int, raw: str | None) -> tuple[str, Decimal | None,
 def estimate_costs(
     credits_by_model: dict[str, Decimal],
     rates: dict[str, Any],
-    usd_to_nok: Any = None,
+    secondary_currency: Any = None,
     *,
     default_rate: Any = None,
 ) -> dict[str, Any]:
@@ -92,10 +92,24 @@ def estimate_costs(
             raise ValueError(f"rate for {model} must be nonnegative")
         per_model[model] = credits * rate
     total_usd = sum((value for value in per_model.values() if value is not None), Decimal(0)) if complete else None
-    total_nok = None
-    if total_usd is not None and usd_to_nok is not None:
-        exchange = _decimal(usd_to_nok, "usd_to_nok")
-        if exchange < 0:
-            raise ValueError("usd_to_nok must be nonnegative")
-        total_nok = total_usd * exchange
-    return {"per_model_usd": per_model, "total_usd": total_usd, "total_nok": total_nok, "complete": complete}
+    currency_code = None
+    exchange = None
+    if secondary_currency is not None:
+        if isinstance(secondary_currency, dict):
+            currency_code = str(secondary_currency.get("code", "")).upper()
+            exchange = _decimal(secondary_currency.get("usd_rate"), "secondary currency rate")
+        else:  # Compatibility for callers using the pre-v4 NOK-only setting.
+            currency_code = "NOK"
+            exchange = _decimal(secondary_currency, "usd_to_nok")
+        if exchange <= 0:
+            raise ValueError("secondary currency rate must be positive")
+    total_secondary = total_usd * exchange if total_usd is not None and exchange is not None else None
+    return {
+        "per_model_usd": per_model,
+        "total_usd": total_usd,
+        "secondary_currency_code": currency_code,
+        "secondary_currency_rate": exchange,
+        "total_secondary": total_secondary,
+        "total_nok": total_secondary if currency_code == "NOK" else None,
+        "complete": complete,
+    }

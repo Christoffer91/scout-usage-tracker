@@ -347,7 +347,7 @@ def format_cost_report(
     report: CostReport,
     period: str = "thread",
     rates: dict[str, Any] | None = None,
-    usd_to_nok: Any = None,
+    secondary_currency: Any = None,
     *,
     scope: str = "chat",
     language: str = "en",
@@ -376,7 +376,7 @@ def format_cost_report(
         ]
 
     pricing = estimate_costs(
-        {item.model: item.credits for item in usage.models}, rates or {}, usd_to_nok,
+        {item.model: item.credits for item in usage.models}, rates or {}, secondary_currency,
         default_rate=default_usd_per_credit,
     )
     priced = [(item, pricing["per_model_usd"][item.model]) for item in usage.models
@@ -384,11 +384,12 @@ def format_cost_report(
     unpriced = [item for item in usage.models if pricing["per_model_usd"].get(item.model) is None]
     lines.extend(["", "Kostnadsestimat:" if language == "nb" else "Estimated gross value:"])
     if priced:
-        exchange = Decimal(str(usd_to_nok)) if usd_to_nok is not None else None
+        exchange = pricing["secondary_currency_rate"]
+        currency_code = pricing["secondary_currency_code"]
         for item, usd in priced:
             cost = ("ca. **" if language == "nb" else "approx. **") + f"USD {_money(usd, language)}"
             if exchange is not None:
-                cost += f" / NOK {_money(usd * exchange, language, '1')}"
+                cost += f" / {currency_code} {_money(usd * exchange, language, '1')}"
             label = f"{_model_name(item.model)}-delen" if language == "nb" else _model_name(item.model)
             lines.append(f"{label}: {cost}**")
     else:
@@ -432,7 +433,7 @@ def format_cost_faq(language: str = "en") -> str:
             "- `/cost alle chatter denne uken` — alle Scout-chatter denne ISO-uken",
             "- `/cost alle chatter denne måneden` — alle Scout-chatter denne måneden",
             "", "Dager, uker og måneder gjelder alltid denne chatten med mindre du eksplisitt skriver «alle chatter».",
-            "Credits beregnes eksakt fra nano-AIU, men vises avrundet til hele credits. USD/NOK er bruttoestimater, ikke en faktura; inkluderte credits kan gjøre faktisk belastning lavere eller null.",
+            "Credits beregnes eksakt fra nano-AIU, men vises avrundet til hele credits. Valutaverdier er bruttoestimater, ikke en faktura; inkluderte credits kan gjøre faktisk belastning lavere eller null.",
             "AIU-verifisering og full historikk vises i det lokale dashboardet.",
         ])
     return "\n".join([
@@ -447,6 +448,6 @@ def format_cost_faq(language: str = "en") -> str:
         "- `/cost all chats this week` — all Scout chats this ISO week",
         "- `/cost all chats this month` — all Scout chats this month",
         "", "Day, week, and month always mean the current chat unless you explicitly say all chats.",
-        "Credits are calculated exactly from nano-AIU but displayed as rounded whole credits. USD/NOK values are gross estimates, not a bill; included credits may make the actual charge lower or zero.",
+        "Credits are calculated exactly from nano-AIU but displayed as rounded whole credits. Currency values are gross estimates, not a bill; included credits may make the actual charge lower or zero.",
         "AIU verification and full history are available in the local dashboard.",
     ])

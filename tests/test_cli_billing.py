@@ -6,11 +6,23 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from scout_usage_tracker.cli import build_parser, command_cost, command_github_sync, main
+from scout_usage_tracker.cli import build_parser, command_configure_currency, command_cost, command_github_sync, main
 from tests.helpers import event, make_source
 
 
 class CliBillingTests(unittest.TestCase):
+    def test_configure_currency_supports_usd_only_and_generic_code(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text(json.dumps({
+                "source_database": "source.db", "history_database": "history.db",
+                "dashboard_path": "dashboard.html",
+            }), encoding="utf-8")
+            self.assertEqual(command_configure_currency(str(path), "eur", "0.92", False), 0)
+            self.assertEqual(json.loads(path.read_text())["secondary_currency"], {"code": "EUR", "usd_rate": "0.92"})
+            self.assertEqual(command_configure_currency(str(path), None, None, True), 0)
+            self.assertIsNone(json.loads(path.read_text())["secondary_currency"])
+
     def test_cost_delegates_missing_session_to_safe_autodetection(self):
         output = StringIO()
         config = {"source_database": "/not/read", "dashboard_path": "/tmp/dashboard.html",

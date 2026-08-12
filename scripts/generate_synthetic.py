@@ -77,7 +77,7 @@ def generate(destination: Path = ROOT / "examples" / "synthetic-dashboard.html")
                 "example-large": "0.08",
                 "example-reasoning": "0.12",
             },
-            "usd_to_nok": "10.00",
+            "secondary_currency": {"code": "NOK", "usd_rate": "10.00"},
             "billing": {"enabled": True, "plan": "pro", "snapshot_path": str(billing_snapshot)},
             "_generated_at": "2026-01-06T12:00:00+00:00",
         }

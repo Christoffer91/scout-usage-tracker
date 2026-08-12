@@ -17,12 +17,13 @@ class BillingTests(unittest.TestCase):
         self.assertEqual(PLAN_CATALOG["max"]["included_credits"], Decimal("20000"))
         self.assertEqual(PLAN_CATALOG["max"]["monthly_price_usd"], Decimal("100"))
         summary = billing_summary(
-            {"billing": {"enabled": True, "plan": "pro"}, "usd_to_nok": "10"},
+            {"billing": {"enabled": True, "plan": "pro"}, "secondary_currency": {"code": "EUR", "usd_rate": "0.9"}},
             Decimal("25"), now=datetime(2026, 8, 1, tzinfo=timezone.utc),
         )
         self.assertEqual(summary["included_credits"], Decimal("1500"))
         self.assertEqual(summary["estimated_gross_scout_usd"], Decimal("0.25"))
-        self.assertEqual(summary["estimated_gross_scout_nok"], Decimal("2.50"))
+        self.assertEqual(summary["secondary_currency_code"], "EUR")
+        self.assertEqual(summary["estimated_gross_scout_secondary"], Decimal("0.225"))
         self.assertIsNone(summary["estimated_additional_credits"])
 
     def test_free_and_unknown_allowances_are_not_guessed(self):
@@ -51,11 +52,11 @@ class BillingTests(unittest.TestCase):
             }), encoding="utf-8")
             summary = billing_summary({
                 "billing": {"enabled": True, "plan": "business", "seat_count": 3, "snapshot_path": str(snapshot_path)},
-                "usd_to_nok": "10",
+                "secondary_currency": {"code": "EUR", "usd_rate": "0.9"},
             }, Decimal("10"), now=datetime(2026, 8, 10, tzinfo=timezone.utc))
             self.assertEqual(summary["estimated_additional_credits"], Decimal("2300"))
             self.assertEqual(summary["estimated_additional_usd"], Decimal("23.00"))
-            self.assertEqual(summary["estimated_additional_nok"], Decimal("230.00"))
+            self.assertEqual(summary["estimated_additional_secondary"], Decimal("20.700"))
 
     def test_mismatched_period_or_scope_never_computes_overage(self):
         snapshot = {
@@ -79,13 +80,13 @@ class BillingTests(unittest.TestCase):
             path.write_text(json.dumps({**base, "schema_version": 1, "billing": {"plan": "pro+", "snapshot_path": "billing.json"}}), encoding="utf-8")
             config = load_config(path)
             self.assertEqual(config["billing"]["plan"], "pro_plus")
-            self.assertEqual(config["schema_version"], 3)
+            self.assertEqual(config["schema_version"], 4)
             self.assertEqual(Path(config["billing"]["snapshot_path"]).resolve(), (Path(temporary) / "billing.json").resolve())
             path.write_text(json.dumps({**base, "billing": {"plan": "pro", "seat_count": True}}), encoding="utf-8")
             with self.assertRaises(ConfigError):
                 load_config(path)
             for bad_exchange in ("NaN", "Infinity", "-1"):
-                path.write_text(json.dumps({**base, "usd_to_nok": bad_exchange}), encoding="utf-8")
+                path.write_text(json.dumps({**base, "secondary_currency": {"code": "EUR", "usd_rate": bad_exchange}}), encoding="utf-8")
                 with self.assertRaises(ConfigError):
                     load_config(path)
             path.write_text(json.dumps({**base, "billing": {"snapshot_path": "s"}}), encoding="utf-8")

@@ -41,9 +41,10 @@ class PricingTests(unittest.TestCase):
     def test_official_default_credit_rate_prices_every_model(self):
         result = estimate_costs(
             {"gpt-5.6-luna": Decimal("2"), "future-model": Decimal("3")},
-            {}, "10", default_rate="0.01",
+            {}, {"code": "EUR", "usd_rate": "0.9"}, default_rate="0.01",
         )
         self.assertEqual(result["per_model_usd"]["gpt-5.6-luna"], Decimal("0.02"))
         self.assertEqual(result["per_model_usd"]["future-model"], Decimal("0.03"))
         self.assertEqual(result["total_usd"], Decimal("0.05"))
-        self.assertEqual(result["total_nok"], Decimal("0.50"))
+        self.assertEqual(result["secondary_currency_code"], "EUR")
+        self.assertEqual(result["total_secondary"], Decimal("0.045"))

@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import ConfigError, ensure_secret, load_config
+from .config import ConfigError, configure_secondary_currency, ensure_secret, load_config
 from .cost_report import CostReportError, build_cost_report, format_cost_faq, format_cost_report
 from .dashboard_server import start_dashboard_viewer
 from .import_usage import import_usage
@@ -86,7 +86,7 @@ def command_cost(
         report,
         selected_period,
         config["usd_per_credit_by_model"],
-        config.get("usd_to_nok"),
+        config.get("secondary_currency"),
         scope=scope,
         language=selected_language,
         default_usd_per_credit=config.get("usd_per_credit", "0.01"),
@@ -111,6 +111,20 @@ def command_open(config: dict) -> int:
     except (AttributeError, OSError, subprocess.CalledProcessError):
         print("Could not open dashboard.", file=sys.stderr)
         return 2
+    return 0
+
+
+def command_configure_currency(config_path: str, code: str | None, usd_rate: str | None, usd_only: bool) -> int:
+    if usd_only:
+        if code is not None or usd_rate is not None:
+            raise ConfigError("--usd-only cannot be combined with --code or --usd-rate")
+        configure_secondary_currency(config_path, None, None)
+        print("PASS currency=USD")
+        return 0
+    if code is None or usd_rate is None:
+        raise ConfigError("--code and --usd-rate are required together")
+    configured = configure_secondary_currency(config_path, code, usd_rate)
+    print(f"PASS currency=USD+{configured['secondary_currency']['code']}")
     return 0
 
 
@@ -149,6 +163,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dashboard-link", choices=("file", "loopback"), default="file",
         help="use a short-lived, localhost-only dashboard link for constrained chat clients",
     )
+    currency = commands.add_parser("configure-currency", help="configure an optional manual USD conversion")
+    currency.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
+    currency.add_argument("--code", help="three-letter secondary currency code")
+    currency.add_argument("--usd-rate", help="manual conversion rate: 1 USD equals this amount")
+    currency.add_argument("--usd-only", action="store_true", help="show USD estimates only")
     current = datetime.now(timezone.utc)
     sync = commands.add_parser("github-sync", help="explicitly fetch aggregate GitHub billing usage through gh")
     sync.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
@@ -162,6 +181,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "configure-currency":
+            return command_configure_currency(args.config, args.code, args.usd_rate, args.usd_only)
         config = load_config(args.config)
         if args.command in ("update", "refresh"):
             return command_update(config)
