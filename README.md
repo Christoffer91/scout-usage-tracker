@@ -2,7 +2,7 @@
 
 See how many AI credits Microsoft Scout uses—locally, privately, and separately from your account-wide GitHub Copilot usage.
 
-The tracker reads Scout's local ledger in read-only mode, retains a private SQLite history, and generates one standalone HTML dashboard. It sends no telemetry, starts no web server, and needs no cloud account.
+The tracker reads Scout's local ledger in read-only mode, retains a private SQLite history, and generates one standalone HTML dashboard. It sends no telemetry, starts no persistent or externally listening server, and needs no cloud account. On Windows, an explicitly requested `/cost` report can start the bounded `127.0.0.1` viewer described below.
 
 **Desktop only:** Scout and this tracker run locally on Windows or macOS. There is no mobile installation or mobile dashboard workflow.
 
@@ -122,7 +122,7 @@ Start a new Scout conversation if needed, then use:
 /cost open                    # open the local dashboard with the native launcher
 ```
 
-English is the default; Norwegian requests return Norwegian output. `/cost` reports usage before the command itself and keeps the current chat as the default scope. It shows rounded credits for readability, model-level gross estimates, a short clickable **Usage tracker** link, and preserves the full final invitation to use `/cost FAQ`.
+Bare `/cost` and bare `/cost FAQ` always return English output; an explicit language request may select Norwegian. The skill returns tracker stdout verbatim. `/cost` reports usage before the command itself and keeps the current chat as the default scope. It shows rounded credits for readability, model-level gross estimates, a short clickable **Usage tracker** link, and preserves the full final invitation to use `/cost FAQ`.
 
 Scout on Windows blocks private `file://` links outside its active workspace. On Windows, the installed skill therefore asks the tracker
 for an on-demand `http://127.0.0.1` link. It is protected by a random capability token, serves only the

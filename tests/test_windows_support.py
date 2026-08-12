@@ -14,7 +14,7 @@ from scout_usage_tracker.aggregate import aggregate, local_zone
 from scout_usage_tracker.cli import command_open
 from scout_usage_tracker.config import ConfigError
 from scout_usage_tracker.cost_report import build_cost_report, format_cost_report
-from scout_usage_tracker.platform_support import sqlite_readonly_uri, timezone_for
+from scout_usage_tracker.platform_support import TimezoneDataError, sqlite_readonly_uri, timezone_for
 from tests.test_cost_report import add_event, create_source
 
 
@@ -22,6 +22,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class WindowsPortableTests(unittest.TestCase):
+    def test_posix_local_timezone_invalid_absolute_tz_keys_fall_back(self):
+        for configured in ("/etc/localtime", "/synthetic/not-a-zoneinfo-key"):
+            with self.subTest(configured=configured), \
+                    patch.dict(os.environ, {"TZ": configured}), \
+                    patch("scout_usage_tracker.platform_support.os.name", "posix"), \
+                    patch("scout_usage_tracker.platform_support.Path.resolve", return_value=Path("/usr/share/zoneinfo/Etc/UTC")), \
+                    patch("scout_usage_tracker.platform_support.ZoneInfo") as zone_info:
+                zone_info.side_effect = lambda key: (_ for _ in ()).throw(ValueError("absolute key")) \
+                    if key == configured else timezone.utc
+                self.assertIs(timezone_for("local"), timezone.utc)
+                self.assertEqual([call.args[0] for call in zone_info.call_args_list], [configured, "Etc/UTC"])
+
+    def test_explicit_invalid_absolute_timezone_is_actionable(self):
+        with patch("scout_usage_tracker.platform_support.ZoneInfo", side_effect=ValueError("absolute key")):
+            with self.assertRaisesRegex(TimezoneDataError, "install timezone data or use local"):
+                timezone_for("/synthetic/not-a-zoneinfo-key")
+
     def test_sqlite_uri_encodes_windows_sensitive_path_and_is_read_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "Scout space-æ#%-usage.sqlite3"
@@ -188,6 +205,21 @@ class WindowsPortableTests(unittest.TestCase):
         self.assertIn("Never display the launcher path or dashboard path", text)
         self.assertIn("never show the selected launcher path", text.lower())
 
+    def test_installer_source_scopes_skill_validation_and_preflights_uninstall(self):
+        text = (ROOT / "install.ps1").read_text(encoding="utf-8")
+        self.assertIn('$InstallRoots = @($InstallRoot, $BinRoot, $ConfigRoot)', text)
+        self.assertIn('if ($InstallScoutSkill) { $InstallRoots += @($ScoutSkillRoot, $CopilotSkillRoot) }', text)
+        self.assertIn('$ownedSkillRoots = @(Get-OwnedSkillDeletionRoots)', text)
+        self.assertIn('Assert-UninstallPreflight $ownedSkillRoots', text)
+        self.assertLess(text.index('Assert-UninstallPreflight $ownedSkillRoots'), text.index('Remove-FileIfPresent $Launcher'))
+        self.assertLess(text.index('Test-SkillPathContainsReparsePoint $root'), text.index('Join-Path $root $OwnerMarkerName'))
+        self.assertIn('if ($Action -eq "uninstall" -or $InstallScoutSkill)', text)
+        self.assertIn('Assert-SkillRootsDoNotOverlapCoreDeletionPaths', text)
+        self.assertLess(
+            text.index('Assert-SkillRootsDoNotOverlapCoreDeletionPaths\n    $ownedSkillRoots'),
+            text.index('$ownedSkillRoots = @(Get-OwnedSkillDeletionRoots)'),
+        )
+
     @unittest.skipUnless(os.name == "nt", "PowerShell launcher selection is Windows-specific")
     def test_cost_skill_powershell_launcher_handles_spaced_userprofile(self):
         powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -223,6 +255,162 @@ class WindowsPortableTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "Windows PowerShell lifecycle")
 class WindowsPowerShellLifecycleTests(unittest.TestCase):
+    @staticmethod
+    def powershell():
+        executable = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        if not executable.is_file():
+            raise unittest.SkipTest("Windows PowerShell 5.1 is unavailable")
+        return executable
+
+    def run_installer(self, profile, *arguments, check=True, overrides=None):
+        env = {**os.environ, "USERPROFILE": str(profile), "SCOUT_USAGE_PYTHON": sys.executable}
+        if overrides:
+            env.update(overrides)
+        return subprocess.run(
+            [str(self.powershell()), "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "install.ps1"), *arguments],
+            env=env, text=True, capture_output=True, check=check, timeout=30,
+        )
+
+    @staticmethod
+    def make_junction(link, target):
+        target.mkdir(parents=True, exist_ok=True)
+        completed = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+            text=True, capture_output=True,
+        )
+        if completed.returncode != 0:
+            raise unittest.SkipTest(f"Windows junction creation is unavailable: {completed.stderr.strip()}")
+
+    def test_install_without_skill_flag_ignores_inactive_skill_roots(self):
+        with tempfile.TemporaryDirectory(prefix="scout-win-inactive-", dir=Path.home()) as temporary:
+            profile = Path(temporary)
+            scout_skill = profile / ".scout/m-skills/cost"
+            scout_skill.mkdir(parents=True)
+            scout_sentinel = scout_skill / "unowned.txt"
+            scout_sentinel.write_text("keep", encoding="utf-8")
+            copilot_skill = profile / ".copilot/m-skills/cost"
+            copilot_skill.parent.mkdir(parents=True)
+            junction_target = profile / "junction-target"
+            self.make_junction(copilot_skill, junction_target)
+
+            self.run_installer(profile, "install")
+            self.run_installer(profile, "update")
+
+            self.assertEqual(scout_sentinel.read_text(encoding="utf-8"), "keep")
+            self.assertTrue(copilot_skill.exists())
+
+    def test_install_without_skill_flag_does_not_resolve_invalid_skill_overrides(self):
+        with tempfile.TemporaryDirectory(prefix="scout-win-invalid-inactive-", dir=Path.home()) as temporary:
+            profile = Path(temporary)
+            overrides = {
+                "SCOUT_COST_SKILL_DIR": "::invalid::scout::skill::",
+                "COPILOT_COST_SKILL_DIR": "::invalid::copilot::skill::",
+            }
+
+            self.run_installer(profile, "install", overrides=overrides)
+            self.run_installer(profile, "update", overrides=overrides)
+
+            self.assertTrue((profile / ".local/bin/scout-usage.cmd").is_file())
+            self.assertFalse((profile / ".scout").exists())
+            self.assertFalse((profile / ".copilot").exists())
+
+    def test_uninstall_preserves_unowned_skill_directory_and_junction(self):
+        with tempfile.TemporaryDirectory(prefix="scout-win-unowned-", dir=Path.home()) as temporary:
+            profile = Path(temporary)
+            self.run_installer(profile, "install")
+            scout_skill = profile / ".scout/m-skills/cost"
+            scout_skill.mkdir(parents=True)
+            scout_sentinel = scout_skill / "unowned.txt"
+            scout_sentinel.write_text("keep", encoding="utf-8")
+            copilot_skill = profile / ".copilot/m-skills/cost"
+            copilot_skill.parent.mkdir(parents=True)
+            junction_target = profile / "unowned-junction-target"
+            junction_sentinel = junction_target / "keep.txt"
+            junction_target.mkdir()
+            junction_sentinel.write_text("keep", encoding="utf-8")
+            self.make_junction(copilot_skill, junction_target)
+
+            self.run_installer(profile, "uninstall")
+
+            self.assertEqual(scout_sentinel.read_text(encoding="utf-8"), "keep")
+            self.assertTrue(copilot_skill.exists())
+            self.assertEqual(junction_sentinel.read_text(encoding="utf-8"), "keep")
+            self.assertFalse((profile / ".local/bin/scout-usage.cmd").exists())
+
+    def test_uninstall_rejects_unowned_skill_nested_under_core_tree_atomically(self):
+        with tempfile.TemporaryDirectory(prefix="scout-win-overlap-", dir=Path.home()) as temporary:
+            profile = Path(temporary)
+            self.run_installer(profile, "install")
+            runtime = profile / ".local/share/scout-usage-tracker"
+            launcher = profile / ".local/bin/scout-usage.cmd"
+            nested_skill = runtime / "src/unowned-cost-skill"
+            nested_skill.mkdir()
+            sentinel = nested_skill / "keep.txt"
+            sentinel.write_text("keep", encoding="utf-8")
+
+            completed = self.run_installer(
+                profile, "uninstall", check=False,
+                overrides={"SCOUT_COST_SKILL_DIR": str(nested_skill)},
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("must not overlap core deletion paths", completed.stderr)
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+            self.assertTrue(launcher.is_file())
+            self.assertTrue((runtime / "templates").is_dir())
+            self.assertTrue((runtime / ".scout-usage-tracker-owned").is_file())
+
+    def test_uninstall_preserves_skill_below_junction_ancestor(self):
+        with tempfile.TemporaryDirectory(prefix="scout-win-parent-junction-", dir=Path.home()) as temporary:
+            profile = Path(temporary)
+            self.run_installer(profile, "install")
+            junction_target = profile / "scout-junction-target"
+            skill_target = junction_target / "m-skills/cost"
+            skill_target.mkdir(parents=True)
+            marker = skill_target / ".scout-usage-tracker-owned"
+            marker.write_text("synthetic owner marker", encoding="utf-8")
+            scout_parent = profile / ".scout"
+            self.make_junction(scout_parent, junction_target)
+
+            self.run_installer(profile, "uninstall")
+
+            self.assertTrue(scout_parent.exists())
+            self.assertEqual(marker.read_text(encoding="utf-8"), "synthetic owner marker")
+            self.assertFalse((profile / ".local/bin/scout-usage.cmd").exists())
+            self.assertFalse((profile / ".local/share/scout-usage-tracker/src").exists())
+
+    def test_uninstall_removes_owned_skills(self):
+        with tempfile.TemporaryDirectory(prefix="scout-win-owned-", dir=Path.home()) as temporary:
+            profile = Path(temporary)
+            self.run_installer(profile, "install", "-InstallScoutSkill")
+            skill_roots = (profile / ".scout/m-skills/cost", profile / ".copilot/m-skills/cost")
+            for root in skill_roots:
+                self.assertTrue((root / ".scout-usage-tracker-owned").is_file())
+
+            self.run_installer(profile, "uninstall")
+
+            for root in skill_roots:
+                self.assertFalse(root.exists())
+
+    def test_failed_uninstall_preflight_does_not_delete_core(self):
+        with tempfile.TemporaryDirectory(prefix="scout-win-atomic-", dir=Path.home()) as temporary:
+            profile = Path(temporary)
+            self.run_installer(profile, "install")
+            runtime = profile / ".local/share/scout-usage-tracker"
+            launcher = profile / ".local/bin/scout-usage.cmd"
+            source_tree = runtime / "src"
+            source_target = profile / "source-target"
+            source_tree.rename(source_target)
+            self.make_junction(source_tree, source_target)
+
+            completed = self.run_installer(profile, "uninstall", check=False)
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("reparse point", completed.stderr)
+            self.assertTrue(launcher.is_file())
+            self.assertTrue((runtime / "templates").is_dir())
+            self.assertTrue((runtime / ".scout-usage-tracker-owned").is_file())
+
     def test_installer_rejects_source_package_overlap_before_mutation(self):
         powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         if not powershell.is_file():

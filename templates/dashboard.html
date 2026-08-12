@@ -171,13 +171,22 @@
     .chart-meta { display: flex; align-items: center; gap: 14px; color: var(--d-muted-text); font-size: 12.5px; }
     .spike-key { display: inline-flex; align-items: center; gap: 5px; }
     .spike-key i { width: 8px; height: 8px; border-radius: 2px; background: var(--d-spike); }
-    .bar-area { position: relative; margin-top: 20px; }
+    .bar-area { position: relative; margin-top: 20px; padding-left: 54px; }
     .bar-tooltip { bottom: calc(100% + 6px); }
-    .bar-chart { display: flex; align-items: flex-end; gap: 2px; height: 150px; }
+    .bar-chart { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: 2px; height: 170px; }
+    .chart-y-axis { position: absolute; inset: 0 auto 0 0; width: 46px; color: var(--d-muted-text); font-size: 10.5px; font-variant-numeric: tabular-nums; pointer-events: none; }
+    .chart-y-tick { position: absolute; right: 0; transform: translateY(50%); white-space: nowrap; }
+    .chart-y-tick::after { content: ""; position: absolute; left: calc(100% + 7px); top: 50%; width: calc(var(--daily-plot-width, 0px)); border-top: 1px solid var(--d-border); opacity: .62; }
+    .chart-y-tick.top { transform: translateY(0); }
+    .chart-y-tick.top::after { top: 0; }
+    .chart-y-break { position: absolute; right: -8px; width: 10px; height: 8px; transform: translateY(50%); background: var(--d-card); }
+    .chart-y-break::before, .chart-y-break::after { content: ""; position: absolute; left: 1px; width: 9px; border-top: 1px solid var(--d-muted-text); transform: rotate(-28deg); }
+    .chart-y-break::before { top: 2px; }
+    .chart-y-break::after { top: 6px; }
     .bar-hit {
       flex: 1;
       min-width: 2px;
-      height: 150px;
+      height: 170px;
       display: flex;
       align-items: flex-end;
       padding: 0;
@@ -190,7 +199,8 @@
     .bar-hit:hover .bar-fill, .bar-hit:focus-visible .bar-fill { background: var(--d-bar-hi); }
     .bar-fill.spike { background: var(--d-spike); }
     .bar-fill.latest { box-shadow: inset 0 0 0 2px var(--d-accent); }
-    .axis { display: flex; justify-content: space-between; margin-top: 8px; color: var(--d-muted-text); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .axis { display: flex; justify-content: space-between; margin-top: 8px; padding-left: 54px; color: var(--d-muted-text); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+    .scale-key { color: var(--d-muted-text); white-space: nowrap; }
     .model-card { display: flex; flex-direction: column; }
     .model-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
     .model-heading p { margin: 4px 0 0; color: var(--d-muted-text); font-size: 12px; }
@@ -494,7 +504,7 @@
     const tooltip = chart.querySelector('.bar-tooltip');
     const show = (bar) => {
       tooltip.textContent = bar.dataset.tip;
-      tooltip.style.left = `${bar.offsetLeft + bar.offsetWidth / 2}px`;
+      tooltip.style.left = `${bar.parentElement.offsetLeft + bar.offsetLeft + bar.offsetWidth / 2}px`;
       tooltip.hidden = false;
     };
     const bindBars = () => chart.querySelectorAll('.bar-hit').forEach((bar) => {
@@ -517,6 +527,10 @@
     dashboard.style.removeProperty('min-height');
     stableDashboardHeight = 0;
     reserveDashboardHeight();
+    document.querySelectorAll('[data-bar-chart]').forEach((chart) => {
+      const bars = chart.querySelector('.bar-chart');
+      if (bars) chart.style.setProperty('--daily-plot-width', `${bars.clientWidth}px`);
+    });
   });
   let filterData = { models: [], money: { mode: 'none' } };
   try { filterData = JSON.parse(dashboard.dataset.filterData || '{}'); } catch (_) {}
@@ -538,6 +552,76 @@
       if (Math.abs(value) >= divisor) return `${(value / divisor).toFixed(1).replace(/\.0$/, '')}${suffix}`;
     }
     return String(value);
+  };
+  const quantile = (sorted, fraction) => {
+    if (!sorted.length) return 0;
+    const position = (sorted.length - 1) * fraction;
+    const lower = Math.floor(position), upper = Math.ceil(position);
+    if (lower === upper) return sorted[lower];
+    return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+  };
+  const dailyScale = (values) => {
+    const positive = values.filter((value) => value > 0).sort((a, b) => a - b);
+    const maximum = Math.max(...positive, 1);
+    if (positive.length < 5) return { compressed: false, maximum, cap: maximum };
+    const q1 = quantile(positive, .25), q3 = quantile(positive, .75);
+    const robustCap = Math.max(q3, q3 + 1.5 * Math.max(0, q3 - q1));
+    const compressed = robustCap > 0 && maximum >= robustCap * 4;
+    return { compressed, maximum, cap: compressed ? robustCap : maximum };
+  };
+  const scaledDailyHeight = (value, scale) => {
+    if (value <= 0) return 0;
+    if (!scale.compressed) return Math.max(3, value / scale.maximum * 100);
+    if (value <= scale.cap) return Math.max(3, value / scale.cap * 72);
+    const upper = Math.log1p((value - scale.cap) / scale.cap);
+    const upperMax = Math.log1p((scale.maximum - scale.cap) / scale.cap);
+    return 72 + upper / Math.max(upperMax, Number.EPSILON) * 28;
+  };
+  const applyDailyScale = (card, rows, values) => {
+    const chart = card.querySelector('[data-bar-chart]');
+    const bars = chart.querySelector('.bar-chart');
+    const scale = dailyScale(values);
+    bars.querySelectorAll('.bar-fill').forEach((fill, index) => {
+      fill.style.height = `${scaledDailyHeight(values[index] || 0, scale).toFixed(2)}%`;
+    });
+    chart.style.setProperty('--daily-plot-width', `${bars.clientWidth}px`);
+    chart.classList.toggle('is-compressed', scale.compressed);
+    let axis = chart.querySelector('.chart-y-axis');
+    if (!axis) {
+      axis = document.createElement('div');
+      axis.className = 'chart-y-axis';
+      axis.setAttribute('aria-hidden', 'true');
+      chart.prepend(axis);
+    }
+    axis.replaceChildren();
+    const ticks = scale.compressed
+      ? [[scale.maximum, 100, 'top'], [scale.cap, 72, ''], [0, 0, '']]
+      : [[scale.maximum, 100, 'top'], [scale.maximum / 2, 50, ''], [0, 0, '']];
+    ticks.forEach(([value, position, className]) => {
+      const tick = document.createElement('span');
+      tick.className = `chart-y-tick ${className}`.trim();
+      tick.style.bottom = `${position}%`;
+      tick.textContent = compact(Math.round(value));
+      axis.append(tick);
+    });
+    if (scale.compressed) {
+      const marker = document.createElement('span');
+      marker.className = 'chart-y-break';
+      marker.style.bottom = '76%';
+      axis.append(marker);
+    }
+    let key = card.querySelector('.scale-key');
+    if (scale.compressed) {
+      if (!key) {
+        key = document.createElement('span');
+        key.className = 'scale-key';
+        card.querySelector('.chart-meta').prepend(key);
+      }
+      key.textContent = `Compressed above ${compact(Math.round(scale.cap))}`;
+    } else if (key) key.remove();
+    bars.setAttribute('aria-label', scale.compressed
+      ? `Daily credits with a compressed scale above ${whole.format(Math.round(scale.cap))} credits`
+      : 'Daily credits with a linear scale');
   };
   const friendlyDay = (label) => {
     const day = new Date(`${label}T00:00:00Z`);
@@ -584,13 +668,25 @@
     const rows = windowRows(dayRows, 30);
     const values = rows.map(credits);
     const low = Math.min(...values), high = Math.max(...values);
+    const scale = dailyScale(values);
     const points = values.map((value, index) => {
       const x = values.length === 1 ? 110 : index * 220 / (values.length - 1);
-      const y = Math.abs(high - low) < Number.EPSILON ? 26 : 48 - (value - low) / (high - low) * 44;
+      const y = Math.abs(high - low) < Number.EPSILON
+        ? 26
+        : scale.compressed
+          ? 48 - scaledDailyHeight(value, scale) / 100 * 44
+          : 48 - (value - low) / (high - low) * 44;
       return [Number(x.toFixed(2)), Number(y.toFixed(2))];
     });
     sparkSeries = { labels: rows.map((row) => friendlyDay(row.label)), values: values.map((value) => whole.format(value)), points };
     spark.querySelector('polyline').setAttribute('points', points.map((point) => point.join(',')).join(' '));
+    spark.querySelector('svg').setAttribute('aria-label', scale.compressed
+      ? `30-day credit trend with a compressed scale above ${whole.format(Math.round(scale.cap))} credits`
+      : '30-day credit trend');
+    const caption = spark.querySelector('.chart-caption');
+    if (caption) caption.textContent = scale.compressed
+      ? `30-day trend · compressed above ${compact(Math.round(scale.cap))}`
+      : '30-day trend';
     spark.querySelector('.spark-dot').hidden = true;
     spark.querySelector('.spark-tooltip').hidden = true;
   };
@@ -614,7 +710,6 @@
     const chart = card.querySelector('[data-bar-chart]');
     const rows = windowRows(dayRows, 60);
     const values = rows.map((row) => Math.max(0, credits(row)));
-    const maximum = Math.max(...values, 1);
     const detectSpikes = dayRows.filter((row) => credits(row) !== 0).length >= 15;
     const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
     const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, values.length));
@@ -631,7 +726,6 @@
       button.setAttribute('aria-label', button.dataset.tip);
       const fill = document.createElement('span');
       fill.className = `bar-fill${value === 0 ? ' empty' : ''}${spike ? ' spike' : ''}${index === rows.length - 1 ? ' latest' : ''}`;
-      fill.style.height = `${value === 0 ? 0 : Math.max(3, value / maximum * 100).toFixed(2)}%`;
       button.append(fill);
       bars.append(button);
     });
@@ -647,6 +741,7 @@
     const range = document.createElement('span');
     range.textContent = 'Last 60 days';
     meta.append(range);
+    applyDailyScale(card, rows, values);
     const axis = card.querySelector('.axis');
     axis.firstElementChild.textContent = rows.length ? friendlyDay(rows[0].label) : '—';
     axis.lastElementChild.textContent = rows.length ? friendlyDay(rows.at(-1).label) : '—';
