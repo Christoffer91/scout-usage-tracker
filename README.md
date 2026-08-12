@@ -10,9 +10,9 @@ The tracker reads Scout's local ledger in read-only mode, retains a private SQLi
 
 > The screenshot uses fictional data. Your dashboard stays on your computer and can contain private usage metadata; review it before sharing.
 
-## Quick start: ask your coding agent
+## Quick start: ask your local agent
 
-Use a local **Codex**, **Claude Code**, or **GitHub Copilot** agent on the computer where Scout is installed. A remote agent cannot safely access Scout's local database and must never ask you to upload it.
+The same prompt works in **Microsoft Scout**, **Codex**, **Claude Code**, and the **GitHub Copilot app**. The agent must have local terminal and file access on the Windows or macOS computer where Scout is installed. A web-only or remote agent cannot install against Scout's local database and must never ask you to upload it.
 
 <details open>
 <summary><strong>Copy this installation prompt</strong></summary>
@@ -21,19 +21,38 @@ Use a local **Codex**, **Claude Code**, or **GitHub Copilot** agent on the compu
 Install or update Scout Usage Tracker from:
 https://github.com/Christoffer91/scout-usage-tracker
 
-Work locally. Read README.md, the platform installer/uninstaller, and config.example.json first.
-Verify Python 3.10+ with sqlite3 and check that Scout's local session-store.db exists.
+You may be running inside Microsoft Scout, Codex, Claude Code, or the GitHub Copilot app.
+Work only on this computer. If you do not have local terminal and file access, stop and explain
+that limitation; never ask me to upload Scout's database.
+
+Detect Windows or macOS and whether this is a new or tracker-owned existing installation.
+Acquire the repository with Git if available. If Git is unavailable, download GitHub's source
+ZIP from https://github.com/Christoffer91/scout-usage-tracker/archive/refs/heads/main.zip
+into a temporary directory instead; do not install Git or a package manager.
+Read README.md, config.example.json, and the relevant installer and uninstaller before acting.
+Verify Python 3.10+ with sqlite3 and check whether Scout's local session-store.db exists.
 
 Privacy and safety:
 - Open Scout's database read-only; never print, upload, modify, or copy it into the repository.
-- Do not use sudo or enable background updates, session reporting, billing sync, or price overrides without asking.
+- Never print prompts, responses, session IDs, private paths, configuration values, or usage totals.
+- Do not use administrator privileges or sudo.
+- Do not enable background updates, session reporting, billing sync, account-wide integrations,
+  or price overrides without explicit approval.
 - Preserve any existing config and history database.
 
-Run the repository tests and privacy checks. On Windows use install.ps1; on macOS/POSIX use
-install.sh. Use the install action for a new install or update for an existing one, then run
-the installed launcher's status, update, and open commands.
+Run the repository tests and privacy checks before installation.
 
-Report PASS/FAIL, the dashboard location, and warnings without exposing private usage values.
+For a new installation:
+- Windows: run .\install.ps1 install -InstallScoutSkill.
+- macOS: run ./install.sh install --install-scout-skill.
+
+For an existing tracker-owned installation, use the equivalent update action with the same skill
+option. Preserve existing configuration, history, optional settings, and dashboard location.
+Then run status, refresh the tracker once, open the generated dashboard locally, and verify the
+installed launcher. Do not create a background job.
+
+Report only PASS/FAIL and non-sensitive warnings. After success, tell me to start a new Scout
+conversation and use /cost.
 ```
 
 </details>
@@ -203,10 +222,13 @@ This creates a user LaunchAgent without `sudo`, `pkill`, or `killall`. macOS pri
 ## Returning-user update prompt
 
 ```text
-Update my local Scout Usage Tracker from the canonical repository. Preserve config, history,
-billing snapshot, and dashboard path. Review the diff; run tests and privacy checks; use the
-idempotent installer update path; refresh once. Do not upload private data or enable new opt-ins.
-Report PASS/FAIL without private totals or paths.
+Update my local Scout Usage Tracker from https://github.com/Christoffer91/scout-usage-tracker.
+Work only on this computer. Preserve config, history, optional settings, and dashboard path.
+Use Git when available or GitHub's main-branch source ZIP in a temporary directory otherwise.
+Read the relevant installer, review the update, run tests and privacy checks, then use the
+idempotent update action with the Scout skill option. Refresh once and open the dashboard locally.
+Do not upload or print private data, use administrator privileges, enable background jobs, or add
+new opt-ins. Report only PASS/FAIL and non-sensitive warnings.
 ```
 
 ## Troubleshooting
