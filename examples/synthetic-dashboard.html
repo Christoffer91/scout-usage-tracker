@@ -179,10 +179,6 @@
     .chart-y-tick::after { content: ""; position: absolute; left: calc(100% + 7px); top: 50%; width: calc(var(--daily-plot-width, 0px)); border-top: 1px solid var(--d-border); opacity: .62; }
     .chart-y-tick.top { transform: translateY(0); }
     .chart-y-tick.top::after { top: 0; }
-    .chart-y-break { position: absolute; right: -8px; width: 10px; height: 8px; transform: translateY(50%); background: var(--d-card); }
-    .chart-y-break::before, .chart-y-break::after { content: ""; position: absolute; left: 1px; width: 9px; border-top: 1px solid var(--d-muted-text); transform: rotate(-28deg); }
-    .chart-y-break::before { top: 2px; }
-    .chart-y-break::after { top: 6px; }
     .bar-hit {
       flex: 1;
       min-width: 2px;
@@ -553,29 +549,28 @@
     }
     return String(value);
   };
-  const quantile = (sorted, fraction) => {
+  const median = (sorted) => {
     if (!sorted.length) return 0;
-    const position = (sorted.length - 1) * fraction;
-    const lower = Math.floor(position), upper = Math.ceil(position);
-    if (lower === upper) return sorted[lower];
-    return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
   };
   const dailyScale = (values) => {
     const positive = values.filter((value) => value > 0).sort((a, b) => a - b);
     const maximum = Math.max(...positive, 1);
-    if (positive.length < 5) return { compressed: false, maximum, cap: maximum };
-    const q1 = quantile(positive, .25), q3 = quantile(positive, .75);
-    const robustCap = Math.max(q3, q3 + 1.5 * Math.max(0, q3 - q1));
-    const compressed = robustCap > 0 && maximum >= robustCap * 4;
-    return { compressed, maximum, cap: compressed ? robustCap : maximum };
+    const typical = positive.slice(0, Math.max(1, Math.ceil(positive.length * .75)));
+    const constant = Math.max(median(typical), 1e-9);
+    const adaptive = positive.length >= 5 && maximum >= constant * 4;
+    return { adaptive, maximum, constant };
   };
   const scaledDailyHeight = (value, scale) => {
     if (value <= 0) return 0;
-    if (!scale.compressed) return Math.max(3, value / scale.maximum * 100);
-    if (value <= scale.cap) return Math.max(3, value / scale.cap * 72);
-    const upper = Math.log1p((value - scale.cap) / scale.cap);
-    const upperMax = Math.log1p((scale.maximum - scale.cap) / scale.cap);
-    return 72 + upper / Math.max(upperMax, Number.EPSILON) * 28;
+    if (!scale.adaptive) return Math.max(3, value / scale.maximum * 100);
+    const height = Math.asinh(value / scale.constant) / Math.asinh(scale.maximum / scale.constant) * 100;
+    return Math.max(3, height);
+  };
+  const dailyScaleValue = (position, scale) => {
+    if (!scale.adaptive) return scale.maximum * position / 100;
+    return scale.constant * Math.sinh(Math.asinh(scale.maximum / scale.constant) * position / 100);
   };
   const applyDailyScale = (card, rows, values) => {
     const chart = card.querySelector('[data-bar-chart]');
@@ -585,7 +580,7 @@
       fill.style.height = `${scaledDailyHeight(values[index] || 0, scale).toFixed(2)}%`;
     });
     chart.style.setProperty('--daily-plot-width', `${bars.clientWidth}px`);
-    chart.classList.toggle('is-compressed', scale.compressed);
+    chart.classList.toggle('is-adaptive', scale.adaptive);
     let axis = chart.querySelector('.chart-y-axis');
     if (!axis) {
       axis = document.createElement('div');
@@ -594,9 +589,7 @@
       chart.prepend(axis);
     }
     axis.replaceChildren();
-    const ticks = scale.compressed
-      ? [[scale.maximum, 100, 'top'], [scale.cap, 72, ''], [0, 0, '']]
-      : [[scale.maximum, 100, 'top'], [scale.maximum / 2, 50, ''], [0, 0, '']];
+    const ticks = [100, 75, 50, 25, 0].map((position) => [dailyScaleValue(position, scale), position, position === 100 ? 'top' : '']);
     ticks.forEach(([value, position, className]) => {
       const tick = document.createElement('span');
       tick.className = `chart-y-tick ${className}`.trim();
@@ -604,23 +597,17 @@
       tick.textContent = compact(Math.round(value));
       axis.append(tick);
     });
-    if (scale.compressed) {
-      const marker = document.createElement('span');
-      marker.className = 'chart-y-break';
-      marker.style.bottom = '76%';
-      axis.append(marker);
-    }
     let key = card.querySelector('.scale-key');
-    if (scale.compressed) {
+    if (scale.adaptive) {
       if (!key) {
         key = document.createElement('span');
         key.className = 'scale-key';
         card.querySelector('.chart-meta').prepend(key);
       }
-      key.textContent = `Compressed above ${compact(Math.round(scale.cap))}`;
+      key.textContent = 'Adaptive scale';
     } else if (key) key.remove();
-    bars.setAttribute('aria-label', scale.compressed
-      ? `Daily credits with a compressed scale above ${whole.format(Math.round(scale.cap))} credits`
+    bars.setAttribute('aria-label', scale.adaptive
+      ? 'Daily credits with a nonlinear adaptive scale'
       : 'Daily credits with a linear scale');
   };
   const friendlyDay = (label) => {
@@ -662,10 +649,20 @@
     }
     return result;
   };
+  const usageWindow = (rows) => {
+    const first = rows.find((row) => credits(row) > 0);
+    if (!first || !filterData.window_end) return { rows: windowRows(rows, 30), label: 'Last 30 days', days: 30 };
+    const start = new Date(`${first.label}T00:00:00Z`);
+    const end = new Date(`${filterData.window_end}T00:00:00Z`);
+    const observedDays = Math.max(1, Math.floor((end - start) / 86400000) + 1);
+    const days = Math.min(30, Math.max(14, observedDays));
+    return { rows: windowRows(rows, days), label: `Last ${days} days`, days };
+  };
 
   const updateSpark = (dayRows) => {
     if (!spark) return;
-    const rows = windowRows(dayRows, 30);
+    const range = usageWindow(dayRows);
+    const rows = range.rows;
     const values = rows.map(credits);
     const low = Math.min(...values), high = Math.max(...values);
     const scale = dailyScale(values);
@@ -673,20 +670,20 @@
       const x = values.length === 1 ? 110 : index * 220 / (values.length - 1);
       const y = Math.abs(high - low) < Number.EPSILON
         ? 26
-        : scale.compressed
+        : scale.adaptive
           ? 48 - scaledDailyHeight(value, scale) / 100 * 44
           : 48 - (value - low) / (high - low) * 44;
       return [Number(x.toFixed(2)), Number(y.toFixed(2))];
     });
     sparkSeries = { labels: rows.map((row) => friendlyDay(row.label)), values: values.map((value) => whole.format(value)), points };
     spark.querySelector('polyline').setAttribute('points', points.map((point) => point.join(',')).join(' '));
-    spark.querySelector('svg').setAttribute('aria-label', scale.compressed
-      ? `30-day credit trend with a compressed scale above ${whole.format(Math.round(scale.cap))} credits`
-      : '30-day credit trend');
+    spark.querySelector('svg').setAttribute('aria-label', scale.adaptive
+      ? `${range.days}-day credit trend with a nonlinear adaptive scale`
+      : `${range.days}-day credit trend with a linear scale`);
     const caption = spark.querySelector('.chart-caption');
-    if (caption) caption.textContent = scale.compressed
-      ? `30-day trend · compressed above ${compact(Math.round(scale.cap))}`
-      : '30-day trend';
+    if (caption) caption.textContent = scale.adaptive
+      ? 'Adaptive trend'
+      : `${range.days}-day trend`;
     spark.querySelector('.spark-dot').hidden = true;
     spark.querySelector('.spark-tooltip').hidden = true;
   };
@@ -708,7 +705,8 @@
   const updateDaily = (dayRows) => {
     const card = document.querySelector('.daily-card');
     const chart = card.querySelector('[data-bar-chart]');
-    const rows = windowRows(dayRows, 60);
+    const range = usageWindow(dayRows);
+    const rows = range.rows;
     const values = rows.map((row) => Math.max(0, credits(row)));
     const detectSpikes = dayRows.filter((row) => credits(row) !== 0).length >= 15;
     const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
@@ -738,9 +736,9 @@
       key.append(marker, 'Unusually high day');
       meta.append(key);
     }
-    const range = document.createElement('span');
-    range.textContent = 'Last 60 days';
-    meta.append(range);
+    const rangeLabel = document.createElement('span');
+    rangeLabel.textContent = range.label;
+    meta.append(rangeLabel);
     applyDailyScale(card, rows, values);
     const axis = card.querySelector('.axis');
     axis.firstElementChild.textContent = rows.length ? friendlyDay(rows[0].label) : '—';
