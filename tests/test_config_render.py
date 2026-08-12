@@ -1,7 +1,10 @@
 import json
+import math
 import os
 import re
+import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -170,15 +173,14 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn('data-bar-chart', text)
         self.assertIn("const dailyScale = (values) =>", text)
         self.assertIn("const scaledDailyHeight = (value, scale) =>", text)
-        self.assertIn("Compressed above", text)
+        self.assertIn("Adaptive scale", text)
         self.assertIn("className = 'chart-y-axis'", text)
-        self.assertIn("className = 'chart-y-break'", text)
-        self.assertIn("Daily credits with a compressed scale above", text)
-        self.assertIn("maximum >= robustCap * 4", text)
-        self.assertIn("value / scale.cap * 72", text)
-        self.assertIn("Math.log1p((value - scale.cap) / scale.cap)", text)
-        self.assertIn("30-day credit trend with a compressed scale above", text)
-        self.assertIn("30-day trend · compressed above", text)
+        self.assertNotIn("className = 'chart-y-break'", text)
+        self.assertIn("Daily credits with a nonlinear adaptive scale", text)
+        self.assertIn("maximum >= constant * 4", text)
+        self.assertIn("Math.asinh(value / scale.constant)", text)
+        self.assertIn("credit trend with a nonlinear adaptive scale", text)
+        self.assertIn("'Adaptive trend'", text)
         self.assertIn('data-model-card', text)
         self.assertIn('data-donut', text)
         self.assertIn('data-filter-data=', text)
@@ -226,6 +228,75 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertEqual(text.count('class="bar-hit"'), 60)
         self.assertEqual(text.count('bar-fill empty'), 59)
         self.assertNotIn("Unusually high day", text.split("<script>", 1)[0])
+
+    def test_daily_chart_uses_fourteen_to_thirty_day_window(self):
+        template = Path("templates/dashboard.html").read_text(encoding="utf-8")
+        self.assertIn("const usageWindow = (rows) =>", template)
+        self.assertIn("const observedDays = Math.max(1, Math.floor((end - start) / 86400000) + 1)", template)
+        self.assertIn("const days = Math.min(30, Math.max(14, observedDays))", template)
+        self.assertIn("rows: windowRows(rows, days)", template)
+        self.assertIn("label: `Last ${days} days`", template)
+        self.assertNotIn("range.textContent = 'Last 60 days'", template)
+
+    def test_adaptive_scale_uses_robust_continuous_mapping(self):
+        template = Path("templates/dashboard.html").read_text(encoding="utf-8")
+        self.assertIn("const typical = positive.slice(0, Math.max(1, Math.ceil(positive.length * .75)))", template)
+        self.assertIn("const constant = Math.max(median(typical), 1e-9)", template)
+        self.assertIn("positive.length >= 5 && maximum >= constant * 4", template)
+        self.assertIn("Math.asinh(value / scale.constant) / Math.asinh(scale.maximum / scale.constant) * 100", template)
+        self.assertIn("scale.constant * Math.sinh(Math.asinh(scale.maximum / scale.constant) * position / 100)", template)
+        self.assertIn("[100, 75, 50, 25, 0].map", template)
+        self.assertIn("if (!scale.adaptive) return Math.max(3, value / scale.maximum * 100)", template)
+
+    def test_adaptive_scale_runtime_scenarios_are_monotonic_and_separated(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("Node.js is unavailable for the dashboard JavaScript runtime scenario")
+        template = Path("templates/dashboard.html").read_text(encoding="utf-8")
+        match = re.search(r"(  const median = .*?)(?=  const applyDailyScale =)", template, re.DOTALL)
+        self.assertIsNotNone(match)
+        runtime = match.group(1) + r"""
+const scenarios = [
+  [34, 48, 52, 94, 501, 8367, 19700],
+  [34, 48, 52, 94, 501, 8367, 19700, 100000],
+];
+const result = scenarios.map((values) => {
+  const scale = dailyScale(values);
+  const heights = values.map((value) => scaledDailyHeight(value, scale));
+  const ticks = [0, 25, 50, 75, 100].map((position) => ({
+    position,
+    value: dailyScaleValue(position, scale),
+  }));
+  return { scale, heights, ticks };
+});
+result.push({
+  scale: dailyScale([40, 42, 44, 46, 48, 50]),
+  heights: [40, 42, 44, 46, 48, 50].map((value) => scaledDailyHeight(value, dailyScale([40, 42, 44, 46, 48, 50]))),
+});
+process.stdout.write(JSON.stringify(result));
+"""
+        completed = subprocess.run([node, "-e", runtime], check=True, capture_output=True, text=True, timeout=10)
+        first, extended, normal = json.loads(completed.stdout)
+        for scenario in (first, extended):
+            self.assertTrue(scenario["scale"]["adaptive"])
+            self.assertTrue(all(left < right for left, right in zip(scenario["heights"], scenario["heights"][1:])))
+            self.assertTrue(all(left["value"] < right["value"] for left, right in zip(scenario["ticks"], scenario["ticks"][1:])))
+            for tick in scenario["ticks"]:
+                mapped = 0 if tick["position"] == 0 else max(
+                    3,
+                    math.asinh(tick["value"] / scenario["scale"]["constant"])
+                    / math.asinh(scenario["scale"]["maximum"] / scenario["scale"]["constant"])
+                    * 100,
+                )
+                self.assertAlmostEqual(mapped, tick["position"], places=8)
+        self.assertGreater(first["heights"][4] - first["heights"][3], 15)
+        self.assertGreater(first["heights"][5] - first["heights"][4], 30)
+        self.assertGreater(first["heights"][6] - first["heights"][5], 10)
+        self.assertGreater(extended["heights"][5] - extended["heights"][4], 25)
+        self.assertGreater(extended["heights"][6] - extended["heights"][5], 7)
+        self.assertGreater(extended["heights"][7] - extended["heights"][6], 15)
+        self.assertFalse(normal["scale"]["adaptive"])
+        self.assertAlmostEqual(normal["heights"][-1], 100)
 
     def test_model_filter_payload_contains_only_aggregate_usage(self):
         source = self.root / "filter-source.sqlite3"
