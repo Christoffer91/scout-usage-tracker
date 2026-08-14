@@ -247,6 +247,14 @@ launchctl print gui/$(id -u)/local.scout-usage-tracker
 
 This creates a user LaunchAgent without `sudo`, `pkill`, or `killall`. macOS privacy controls may require granting file access. Manual updates remain fully supported.
 
+For a custom Scout automation on macOS, call the installed launcher:
+
+```sh
+"$HOME/.local/bin/scout-usage" update
+```
+
+Do not invoke the tracker through a Python script or module directly. Scout can have a different `PATH` than Terminal; the installed launcher keeps using the Python runtime verified during installation.
+
 ## Returning-user update prompt
 
 ```text

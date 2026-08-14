@@ -24,6 +24,10 @@ class LifecyclePrivacyTests(unittest.TestCase):
         self.assertNotIn("starts no web server", readme)
         self.assertIn("starts no persistent or externally listening server", readme)
         self.assertIn("bounded `127.0.0.1` viewer", readme)
+        self.assertIn("For a custom Scout automation on macOS", readme)
+        self.assertIn('"$HOME/.local/bin/scout-usage" update', readme)
+        self.assertNotIn("update_tracker.py", readme)
+        self.assertNotIn("python3 -m scout_usage_tracker", readme)
 
     @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
     def test_shell_syntax_and_install_permissions_and_opt_in(self):
