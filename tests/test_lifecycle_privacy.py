@@ -205,6 +205,38 @@ class LifecyclePrivacyTests(unittest.TestCase):
             self.assertIn("Python 3.10 or newer is required", completed.stderr)
             self.assertFalse((home / ".local").exists())
 
+    @unittest.skipUnless(shutil.which("sh"), "POSIX sh is unavailable")
+    def test_installed_launcher_pins_the_validated_python(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"; home.mkdir()
+            fake_bin = root / "validated-python"; fake_bin.mkdir()
+            fake_python = fake_bin / "python3"
+            fake_python.write_text(
+                f"#!/bin/sh\nexec '{sys.executable}' \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            install_env = {**os.environ, "HOME": str(home), "PATH": f"{fake_bin}:/bin:/usr/bin"}
+            subprocess.run(
+                ["sh", str(ROOT / "install.sh"), "install", "--usd-only"],
+                env=install_env,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+
+            launcher = home / ".local/bin/scout-usage"
+            self.assertIn(f"exec '{fake_python}' -m scout_usage_tracker", launcher.read_text(encoding="utf-8"))
+            completed = subprocess.run(
+                [str(launcher), "--help"],
+                env={**os.environ, "HOME": str(home), "PATH": "/bin:/usr/bin"},
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("usage: scout-usage", completed.stdout)
+
     def test_synthetic_check_does_not_rewrite_committed_example(self):
         dashboard = ROOT / "examples/synthetic-dashboard.html"
         before = (dashboard.read_bytes(), dashboard.stat().st_mtime_ns)
