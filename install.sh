@@ -38,6 +38,7 @@ purge=false
 currency_code=
 usd_rate=
 usd_only=false
+PYTHON_BIN=
 
 case "$action" in
   install|update)
@@ -82,13 +83,17 @@ if [ "$enable_auto" = true ] && [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 check_requirements() {
-  command -v python3 >/dev/null 2>&1 || { echo "Python 3.10 or newer is required." >&2; exit 1; }
-  python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || { echo "Python 3.10 or newer is required." >&2; exit 1; }
-  python3 -c 'import sqlite3; assert sqlite3.sqlite_version' || { echo "Python SQLite support is required." >&2; exit 1; }
+  PYTHON_BIN=$(command -v python3) || { echo "Python 3.10 or newer is required." >&2; exit 1; }
+  case "$PYTHON_BIN" in
+    /*) ;;
+    *) echo "Python 3 must resolve to an absolute executable path." >&2; exit 1 ;;
+  esac
+  "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || { echo "Python 3.10 or newer is required." >&2; exit 1; }
+  "$PYTHON_BIN" -c 'import sqlite3; assert sqlite3.sqlite_version' || { echo "Python SQLite support is required." >&2; exit 1; }
 }
 
 validate_paths() {
-  python3 -c '
+  "$PYTHON_BIN" -c '
 import pathlib, sys
 home_raw = pathlib.Path(sys.argv[1])
 if not home_raw.is_absolute() or home_raw == pathlib.Path("/"):
@@ -154,7 +159,7 @@ write_launcher() {
   {
     echo '#!/bin/sh'
     printf '%s\n' "export PYTHONPATH='$INSTALL_ROOT/src'"
-    printf '%s\n' "exec python3 -m scout_usage_tracker --config '$CONFIG_PATH' \"\$@\""
+    printf '%s\n' "exec '$PYTHON_BIN' -m scout_usage_tracker --config '$CONFIG_PATH' \"\$@\""
   } > "$temp_launcher"
   chmod 700 "$temp_launcher"
   mv "$temp_launcher" "$BIN_DIR/scout-usage"
@@ -192,7 +197,7 @@ select_currency() {
     fi
   fi
   if [ "$usd_only" = false ] && [ -n "$currency_code" ]; then
-    python3 -c '
+    "$PYTHON_BIN" -c '
 import decimal, re, sys
 code = sys.argv[1].upper()
 if not re.fullmatch(r"[A-Z]{3}", code) or code == "USD":
