@@ -167,7 +167,8 @@
     .hero-kpi small { display: block; min-height: 3em; max-width: 155px; color: var(--d-muted-text); font-size: 11.5px; line-height: 1.5; }
     .chart-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 24px; }
     .daily-card, .model-card { padding: 24px 28px; }
-    .card-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+    .card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+    .chart-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
     .chart-meta { display: flex; align-items: center; gap: 14px; color: var(--d-muted-text); font-size: 12.5px; }
     .spike-key { display: inline-flex; align-items: center; gap: 5px; }
     .spike-key i { width: 8px; height: 8px; border-radius: 2px; background: var(--d-spike); }
@@ -185,7 +186,7 @@
     .chart-y-break::after { top: 6px; }
     .bar-hit {
       flex: 1;
-      min-width: 2px;
+      min-width: 0;
       height: 170px;
       display: flex;
       align-items: flex-end;
@@ -201,6 +202,30 @@
     .bar-fill.latest { box-shadow: inset 0 0 0 2px var(--d-accent); }
     .axis { display: flex; justify-content: space-between; margin-top: 8px; padding-left: 54px; color: var(--d-muted-text); font-size: 11.5px; font-variant-numeric: tabular-nums; }
     .scale-key { color: var(--d-muted-text); white-space: nowrap; }
+    .period-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--d-border);
+      border-radius: 7px;
+      background: var(--d-bg);
+    }
+    .period-button {
+      min-width: 34px;
+      min-height: 25px;
+      padding: 3px 7px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--d-muted-text);
+      font-size: 11.5px;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+      cursor: pointer;
+    }
+    .period-button:hover { color: var(--d-strong); background: var(--d-card); }
+    .period-button[aria-pressed="true"] { color: #fff; background: var(--d-accent); }
     .model-card { display: flex; flex-direction: column; }
     .model-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
     .model-heading p { margin: 4px 0 0; color: var(--d-muted-text); font-size: 12px; }
@@ -378,6 +403,8 @@
       .model-legend { width: 100%; }
       .model-legend-head, .model-row { grid-template-columns: 10px minmax(100px, 1fr) minmax(58px, auto) minmax(50px, auto); }
       .quiet-row { grid-template-columns: minmax(0, 1fr); }
+      .chart-heading-actions { width: 100%; justify-content: flex-start; }
+      .period-toggle { max-width: 100%; overflow-x: auto; }
       .chart-meta { align-items: flex-end; flex-direction: column; gap: 2px; }
       .quiet-card dl { grid-template-columns: 1fr; gap: 2px; }
       .quiet-card dd { margin-bottom: 8px; text-align: left; }
@@ -539,6 +566,34 @@
   if (!models.length) return;
 
   const selected = new Set(models.map((model) => model.id));
+  const allowedPeriods = [7, 14, 30, 60, 90, 365];
+  let storedPeriod = null;
+  try { storedPeriod = Number(localStorage.getItem('scout-period-days')); } catch (_) {}
+  let periodDays = allowedPeriods.includes(storedPeriod) ? storedPeriod : 30;
+  const periodButtons = Array.from(document.querySelectorAll('[data-period-days]'));
+  const syncPeriodButtons = () => periodButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', String(Number(button.dataset.periodDays) === periodDays));
+  });
+  periodButtons.forEach((button, index) => {
+    button.addEventListener('click', () => {
+      periodDays = Number(button.dataset.periodDays);
+      syncPeriodButtons();
+      try { localStorage.setItem('scout-period-days', String(periodDays)); } catch (_) {}
+      updateAll();
+    });
+    button.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      let target = index;
+      if (event.key === 'ArrowLeft') target = (index - 1 + periodButtons.length) % periodButtons.length;
+      if (event.key === 'ArrowRight') target = (index + 1) % periodButtons.length;
+      if (event.key === 'Home') target = 0;
+      if (event.key === 'End') target = periodButtons.length - 1;
+      periodButtons[target].focus();
+      periodButtons[target].click();
+    });
+  });
+  syncPeriodButtons();
   const whole = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
   const costNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
   const blank = () => ({ nano: 0, calls: 0, input: 0, output: 0, cache_read: 0 });
@@ -627,27 +682,57 @@
     const day = new Date(`${label}T00:00:00Z`);
     return Number.isNaN(day.valueOf()) ? label : `${day.getUTCDate()} ${day.toLocaleString('en', { month: 'short', timeZone: 'UTC' })}`;
   };
-  const combined = () => {
+  const rangeBounds = (days, previous = false) => {
+    if (!filterData.window_end) return null;
+    const end = new Date(`${filterData.window_end}T00:00:00Z`);
+    if (previous) end.setUTCDate(end.getUTCDate() - days);
+    const start = new Date(end);
+    start.setUTCDate(end.getUTCDate() - days + 1);
+    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+  };
+  const recordsForPeriod = (days, previous = false) => {
+    const bounds = rangeBounds(days, previous);
+    if (!bounds) return [];
+    return drilldownRecords.filter((record) => record.day >= bounds.start && record.day <= bounds.end);
+  };
+  let currentPeriodRecords = [];
+  const combined = (records) => {
     const total = blank();
-    const maps = { day: new Map(), week: new Map(), month: new Map() };
-    models.filter((model) => selected.has(model.id)).forEach((model) => {
-      add(total, model.total);
-      Object.entries(model.groups || {}).forEach(([name, rows]) => {
-        if (!maps[name]) return;
-        rows.forEach((source) => {
-          if (!maps[name].has(source.label)) maps[name].set(source.label, { ...blank(), label: source.label });
-          add(maps[name].get(source.label), source);
-        });
-      });
+    const maps = { day: new Map(), week: new Map(), month: new Map(), model: new Map() };
+    records.filter((record) => selected.has(record.model)).forEach((record) => {
+      add(total, record);
+      for (const name of ['day', 'week', 'month', 'model']) {
+        const label = name === 'model' ? record.model : record[name];
+        if (!maps[name].has(label)) maps[name].set(label, { ...blank(), label });
+        add(maps[name].get(label), record);
+      }
     });
     const groups = {};
     Object.entries(maps).forEach(([name, values]) => {
       groups[name] = Array.from(values.values()).sort((a, b) => a.label.localeCompare(b.label));
+      if (name === 'model') {
+        groups[name].forEach((item) => {
+          const model = models.find((candidate) => candidate.id === item.label);
+          const modelCredits = model ? credits(model.total) : 0;
+          const rate = modelCredits ? Number(model.estimated_usd || 0) / modelCredits : null;
+          item.estimated_usd = model?.estimated_usd == null || rate == null ? null : credits(item) * rate;
+        });
+      }
     });
-    groups.model = models.filter((model) => selected.has(model.id)).map((model) => ({
-      ...model.total, label: model.id, estimated_usd: model.estimated_usd,
-    })).sort((a, b) => a.label.localeCompare(b.label));
     return { total, groups };
+  };
+  const totalFor = (records) => {
+    const total = blank();
+    records.filter((record) => selected.has(record.model)).forEach((record) => add(total, record));
+    return total;
+  };
+  const modelUsageFor = (records) => {
+    const grouped = new Map();
+    records.forEach((record) => {
+      if (!grouped.has(record.model)) grouped.set(record.model, { ...blank(), label: record.model });
+      add(grouped.get(record.model), record);
+    });
+    return Array.from(grouped.values());
   };
   const windowRows = (rows, days) => {
     if (!filterData.window_end) return [];
@@ -663,9 +748,9 @@
     return result;
   };
 
-  const updateSpark = (dayRows) => {
+  const updateSpark = (dayRows, days) => {
     if (!spark) return;
-    const rows = windowRows(dayRows, 30);
+    const rows = windowRows(dayRows, days);
     const values = rows.map(credits);
     const low = Math.min(...values), high = Math.max(...values);
     const scale = dailyScale(values);
@@ -681,34 +766,33 @@
     sparkSeries = { labels: rows.map((row) => friendlyDay(row.label)), values: values.map((value) => whole.format(value)), points };
     spark.querySelector('polyline').setAttribute('points', points.map((point) => point.join(',')).join(' '));
     spark.querySelector('svg').setAttribute('aria-label', scale.compressed
-      ? `30-day credit trend with a compressed scale above ${whole.format(Math.round(scale.cap))} credits`
-      : '30-day credit trend');
+      ? `${days}-day credit trend with a compressed scale above ${whole.format(Math.round(scale.cap))} credits`
+      : `${days}-day credit trend`);
     const caption = spark.querySelector('.chart-caption');
     if (caption) caption.textContent = scale.compressed
-      ? `30-day trend · compressed above ${compact(Math.round(scale.cap))}`
-      : '30-day trend';
+      ? `${days}-day trend · compressed above ${compact(Math.round(scale.cap))}`
+      : `${days}-day trend`;
     spark.querySelector('.spark-dot').hidden = true;
     spark.querySelector('.spark-tooltip').hidden = true;
   };
-  const updateTrend = (dayRows) => {
+  const updateTrend = (days, currentTotal) => {
     const element = document.querySelector('[data-delta]');
-    const rows = windowRows(dayRows, 60);
-    const current = rows.slice(-30).reduce((sum, row) => sum + credits(row), 0);
-    const previous = rows.slice(-60, -30).reduce((sum, row) => sum + credits(row), 0);
-    let text = '— vs previous 30 days', state = 'delta-neutral';
+    const current = credits(currentTotal);
+    const previous = credits(totalFor(recordsForPeriod(days, true)));
+    let text = `— vs previous ${days} days`, state = 'delta-neutral';
     if (previous) {
       const change = (current - previous) / Math.abs(previous) * 100;
-      if (change > 0) { text = `▲ +${change.toFixed(0)}% vs previous 30 days`; state = 'delta-up'; }
-      else if (change < 0) { text = `▼ ${change.toFixed(0)}% vs previous 30 days`; state = 'delta-down'; }
-      else text = '— 0% vs previous 30 days';
+      if (change > 0) { text = `▲ +${change.toFixed(0)}% vs previous ${days} days`; state = 'delta-up'; }
+      else if (change < 0) { text = `▼ ${change.toFixed(0)}% vs previous ${days} days`; state = 'delta-down'; }
+      else text = `— 0% vs previous ${days} days`;
     }
     element.textContent = text;
     element.className = `delta ${state}`;
   };
-  const updateDaily = (dayRows) => {
+  const updateDaily = (dayRows, days) => {
     const card = document.querySelector('.daily-card');
     const chart = card.querySelector('[data-bar-chart]');
-    const rows = windowRows(dayRows, 60);
+    const rows = windowRows(dayRows, days);
     const values = rows.map((row) => Math.max(0, credits(row)));
     const detectSpikes = dayRows.filter((row) => credits(row) !== 0).length >= 15;
     const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
@@ -716,6 +800,7 @@
     const threshold = mean + 1.6 * deviation;
     const bars = chart.querySelector('.bar-chart');
     bars.replaceChildren();
+    bars.style.gap = days >= 365 ? '1px' : days >= 90 ? '1.5px' : '2px';
     rows.forEach((row, index) => {
       const value = values[index];
       const spike = detectSpikes && deviation > 0 && value > threshold;
@@ -738,9 +823,6 @@
       key.append(marker, 'Unusually high day');
       meta.append(key);
     }
-    const range = document.createElement('span');
-    range.textContent = 'Last 60 days';
-    meta.append(range);
     applyDailyScale(card, rows, values);
     const axis = card.querySelector('.axis');
     axis.firstElementChild.textContent = rows.length ? friendlyDay(rows[0].label) : '—';
@@ -783,7 +865,7 @@
     const grid = document.createElement('div');
     grid.className = 'drilldown-grid';
     const key = recordKey(group);
-    const source = drilldownRecords.filter((record) => selected.has(record.model) && record[key] === label);
+    const source = currentPeriodRecords.filter((record) => selected.has(record.model) && record[key] === label);
     const parentLabel = label;
     drilldownDefinitions(group).forEach(([title, detailKey]) => {
       const details = groupedDetails(source, detailKey);
@@ -902,6 +984,7 @@
   const filterStatus = modelCard.querySelector('[data-model-filter-status]');
   const showAll = modelCard.querySelector('[data-show-all]');
   let segments = [];
+  let currentModelUsage = new Map();
   const resetDonut = () => { donutCenter.textContent = 'credits'; donutTooltip.hidden = true; };
   const resetDonutLift = () => {
     donut.classList.remove('is-hovered');
@@ -909,18 +992,20 @@
     donut.style.removeProperty('--tilt-y');
   };
   const showDetail = (model, share, x = 55, y = -34) => {
+    const usage = currentModelUsage.get(model.id) || blank();
     donutCenter.textContent = `${model.id} ${share.toFixed(0)}%`;
-    donutTooltip.textContent = `${model.id} · ${share.toFixed(0)}% · ${whole.format(credits(model.total))} credits`;
+    donutTooltip.textContent = `${model.id} · ${share.toFixed(0)}% · ${whole.format(credits(usage))} credits`;
     donutTooltip.style.left = `${x}px`;
     donutTooltip.style.top = `${y}px`;
     donutTooltip.hidden = false;
   };
-  const updateModels = () => {
+  const updateModels = (modelRows) => {
+    currentModelUsage = new Map(modelRows.map((row) => [row.label, row]));
     const included = models.filter((model) => selected.has(model.id));
-    const total = included.reduce((sum, model) => sum + credits(model.total), 0);
+    const total = included.reduce((sum, model) => sum + credits(currentModelUsage.get(model.id) || blank()), 0);
     let cursor = 0;
     segments = included.map((model) => {
-      const share = total ? credits(model.total) / total * 100 : 0;
+      const share = total ? credits(currentModelUsage.get(model.id) || blank()) / total * 100 : 0;
       const segment = { model, share, start: cursor, end: cursor + share };
       cursor += share;
       return segment;
@@ -937,7 +1022,7 @@
       row.setAttribute('aria-pressed', String(active));
       row.setAttribute('aria-label', `${active ? 'Exclude' : 'Include'} ${model.id} ${active ? 'from' : 'in'} dashboard totals`);
       row.querySelector('.model-share').textContent = segment ? `${segment.share.toFixed(0)}%` : '—';
-      row.querySelector('.model-credits').textContent = whole.format(credits(model.total));
+      row.querySelector('.model-credits').textContent = whole.format(credits(currentModelUsage.get(model.id) || blank()));
     });
     filterStatus.textContent = `${selected.size} of ${models.length} models included`;
     const allModelsIncluded = selected.size === models.length;
@@ -986,13 +1071,13 @@
   });
   showAll.addEventListener('click', () => { models.forEach((model) => selected.add(model.id)); updateAll(); });
 
-  const updateMoney = (total) => {
+  const updateMoney = (view) => {
     const container = document.querySelector('[data-money-kpi]');
     if (!container) return;
     const mode = filterData.money?.mode;
     let usd = null;
-    if (mode === 'model') usd = models.filter((model) => selected.has(model.id)).reduce((sum, model) => sum + Number(model.estimated_usd || 0), 0);
-    if (mode === 'credit') usd = credits(total) * Number(filterData.money.usd_per_credit || 0);
+    if (mode === 'model') usd = view.groups.model.reduce((sum, model) => sum + Number(model.estimated_usd || 0), 0);
+    if (mode === 'credit') usd = credits(view.total) * Number(filterData.money.usd_per_credit || 0);
     if (usd == null) return;
     container.querySelector('[data-money-total]').textContent = `USD ${whole.format(usd)}`;
     const secondary = filterData.money.secondary_currency;
@@ -1001,7 +1086,8 @@
   };
   function updateAll() {
     reserveDashboardHeight();
-    const view = combined();
+    currentPeriodRecords = recordsForPeriod(periodDays);
+    const view = combined(currentPeriodRecords);
     document.querySelector('[data-total-credits]').textContent = whole.format(credits(view.total));
     document.querySelector('[data-total-calls]').textContent = compact(view.total.calls);
     document.querySelector('[data-total-tokens]').textContent = `${compact(view.total.input)} / ${compact(view.total.output)}`;
@@ -1009,17 +1095,15 @@
     document.querySelector('[data-total-cache]').textContent = denominator ? `${(view.total.cache_read / denominator * 100).toFixed(1)}%` : '—';
     const summary = document.querySelector('[data-filter-summary]');
     const allModelsIncluded = selected.size === models.length;
-    summary.classList.toggle('is-concealed', allModelsIncluded);
-    summary.setAttribute('aria-hidden', String(allModelsIncluded));
-    summary.textContent = allModelsIncluded
-      ? 'Filtered view'
-      : `Filtered view · ${selected.size} of ${models.length} models`;
-    updateMoney(view.total);
-    updateTrend(view.groups.day);
-    updateSpark(view.groups.day);
-    updateDaily(view.groups.day);
+    summary.classList.remove('is-concealed');
+    summary.setAttribute('aria-hidden', 'false');
+    summary.textContent = `Last ${periodDays} days${allModelsIncluded ? '' : ` · ${selected.size} of ${models.length} models`}`;
+    updateMoney(view);
+    updateTrend(periodDays, view.total);
+    updateSpark(view.groups.day, periodDays);
+    updateDaily(view.groups.day, periodDays);
     updateBreakdowns(view.groups);
-    updateModels();
+    updateModels(modelUsageFor(currentPeriodRecords));
   }
   updateAll();
 })();
