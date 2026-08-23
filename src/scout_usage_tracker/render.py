@@ -219,7 +219,7 @@ def _sparkline(daily: list[dict[str, Any]]) -> str:
 
 
 def _daily_chart(daily: list[dict[str, Any]]) -> str:
-    series = _calendar_window(daily, 60)
+    series = _calendar_window(daily, 30)
     detect_spikes = len(daily) >= 15
     if not series:
         bars = '<p class="empty">No daily usage events.</p>'
@@ -245,9 +245,17 @@ def _daily_chart(daily: list[dict[str, Any]]) -> str:
         bars = "".join(rendered)
         start, end = _friendly_day(series[0]["label"]), _friendly_day(series[-1]["label"])
     spike_legend = '<span class="spike-key"><i></i>Unusually high day</span>' if detect_spikes else ""
+    period_buttons = "".join(
+        f'<button type="button" class="period-button" data-period-days="{days}" '
+        f'aria-pressed="{str(days == 30).lower()}">{days}d</button>'
+        for days in (7, 14, 30, 60, 90, 365)
+    )
     return (
         '<section class="card daily-card"><div class="card-heading"><h2>Daily credits</h2>'
-        f'<div class="chart-meta">{spike_legend}<span>Last 60 days</span></div></div>'
+        '<div class="chart-heading-actions">'
+        f'<div class="chart-meta">{spike_legend}</div>'
+        '<div class="period-toggle" role="group" aria-label="Dashboard time period">'
+        f'{period_buttons}</div></div></div>'
         '<div class="bar-area" data-bar-chart><div class="chart-tooltip bar-tooltip" role="status" aria-live="polite" hidden></div>'
         f'<div class="bar-chart">{bars}</div></div><div class="axis"><span>{_escape(start)}</span><span>{_escape(end)}</span></div></section>'
     )
