@@ -70,7 +70,8 @@ conversation and use /cost.
 - Incremental private history and independent AIU verification.
 - Optional `/cost` reports and anonymized chat drill-downs.
 
-## Install manually
+<details>
+<summary><strong>Manual installation</strong></summary>
 
 Requirements: Python 3.10+ with SQLite and a local Scout database (`%USERPROFILE%\.scout\copilot\session-store.db` on Windows or `~/.scout/copilot/session-store.db` on macOS/POSIX).
 
@@ -117,6 +118,8 @@ git pull --ff-only
 ./install.sh update
 ${HOME}/.local/bin/scout-usage update
 ```
+
+</details>
 
 ## Optional `/cost` inside Scout
 
@@ -177,6 +180,9 @@ It never stores or sends:
 On POSIX, runtime directories use mode `0700` and private files use `0600`. On Windows, the installer canonicalizes managed paths, refuses reparse points, and keeps them under the current user profile. Dashboard values are HTML-escaped and protected by a strict Content Security Policy.
 
 Chat reporting is off by default. If enabled, drill-downs use local contextual labels such as `Chat-1`; they are not Scout titles or stable identities. Scout exposes no supported read-only API for its visible chat names, so the tracker does not decrypt or infer them.
+
+<details>
+<summary><strong>Advanced configuration and automation</strong></summary>
 
 ## Configuration
 
@@ -268,6 +274,8 @@ Do not upload or print private data, use administrator privileges, enable backgr
 new opt-ins. Report only PASS/FAIL and non-sensitive warnings.
 ```
 
+</details>
+
 ## Troubleshooting
 
 ```sh
@@ -281,7 +289,8 @@ ${HOME}/.local/bin/scout-usage update
 - **Verification warning:** inspect the dashboard's Usage integrity card. Credits still use authoritative `total_nano_aiu`.
 - **Possible history gap:** Scout may have deleted events before the tracker imported them; retained tracker history is not removed.
 
-## Uninstall
+<details>
+<summary><strong>Uninstall</strong></summary>
 
 Windows preserves config, history, dashboard, secret, and logs by default:
 
@@ -310,6 +319,11 @@ Remove tracker-owned data too:
 ```
 
 Only enumerated tracker-owned paths are removed; unsafe or unowned locations are refused.
+
+</details>
+
+<details>
+<summary><strong>Verification and maintainer reference</strong></summary>
 
 ## Windows verification status
 
@@ -351,6 +365,8 @@ Regenerate the fictional dashboard after intentional rendering changes:
 ```sh
 PYTHONPATH=src python3 scripts/generate_synthetic.py
 ```
+
+</details>
 
 ## Limitations
 
