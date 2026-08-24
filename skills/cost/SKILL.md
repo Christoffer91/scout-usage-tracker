@@ -1,6 +1,6 @@
 ---
 name: cost
-description: Show private local Scout usage for the current chat or explicitly all local chats, including last answer, day, ISO week, month, model calls, tokens, exact nano-AIU accounting, and gross cost estimates. Use whenever the user invokes /cost or asks what Scout usage has consumed, in English or another language.
+description: Show private local Scout usage for the current chat or explicitly all local chats, including last answer, day, week, month, model calls, tokens, exact nano-AIU accounting, and gross cost estimates. Use whenever the user invokes /cost or asks what Scout usage has consumed, in English or another language.
 ---
 
 # Scout Cost
@@ -102,7 +102,7 @@ The command uses Scout's active `SESSION_ID` when available. Calendar and automa
 
 - `Last completed answer` can include several model calls belonging to one completed turn.
 - `Current chat` excludes the currently running `/cost` turn.
-- Day, ISO week, and month use only the current chat unless the user explicitly requests all chats.
+- Day, week, and month use only the current chat unless the user explicitly requests all chats.
 - `All chats` means locally retained Scout chats only, never account-wide GitHub Copilot usage.
 - `AIU data` checks stored `total_nano_aiu` against independent recalculation from `token_details_json` for the selected report; it does not verify billing.
 - Gross USD uses GitHub's published conversion of USD 0.01 per AI credit. Model token rates are already reflected in Scout's exact credits. Actual billed usage can be lower or zero because of included credits.

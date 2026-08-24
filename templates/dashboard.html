@@ -892,7 +892,7 @@
     const caption = spark.querySelector('.chart-caption');
     if (caption) caption.textContent = scale.compressed
       ? `${days}-day trend · compressed above ${formatScaleValue(scale.cap)}`
-      : `${days}-day trend${selectedMetric === 'cost' ? ` · Estimated ${selectedCurrency}` : ''}`;
+      : `${days}-day trend${selectedMetric === 'cost' ? ' · Estimated cost' : ''}`;
     spark.querySelector('.spark-dot').hidden = true;
     spark.querySelector('.spark-tooltip').hidden = true;
   };
@@ -917,7 +917,7 @@
     const rows = weekly ? weeklyRows(windowRows(dayRows, days)) : windowRows(dayRows, days);
     const values = rows.map((row) => Math.max(0, metricValue(row)));
     const chartLabel = selectedMetric === 'cost'
-      ? `Estimated ${weekly ? 'weekly' : 'daily'} cost (${selectedCurrency})`
+      ? `Estimated ${weekly ? 'weekly' : 'daily'} cost`
       : `${weekly ? 'Weekly' : 'Daily'} credits`;
     const detectSpikes = values.filter((value) => value > 0).length >= 15;
     const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
@@ -932,7 +932,7 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'bar-hit';
-      const periodLabel = weekly ? `ISO week ${row.label}` : friendlyDay(row.label);
+      const periodLabel = weekly ? `Week ${row.label}` : friendlyDay(row.label);
       button.dataset.tip = `${periodLabel} · ${selectedMetric === 'cost' ? 'Estimated ' : ''}${formatMetric(row)}${selectedMetric === 'credits' ? ' credits' : ''}${spike ? ` · unusually high ${weekly ? 'week' : 'day'}` : ''}`;
       button.setAttribute('aria-label', button.dataset.tip);
       const fill = document.createElement('span');
@@ -981,7 +981,7 @@
   const drilldownDefinitions = (group) => ({
     day: [['Models', 'model'], ['Chats', 'chat']],
     week: [['Days', 'day'], ['Models', 'model'], ['Chats', 'chat']],
-    month: [['ISO weeks', 'week'], ['Models', 'model'], ['Chats', 'chat']],
+    month: [['Weeks', 'week'], ['Models', 'model'], ['Chats', 'chat']],
     model: [['Days', 'day'], ['Chats', 'chat']],
   }[group] || []);
   const makeDrilldownRow = (group, label, columnCount) => {
@@ -1006,7 +1006,7 @@
       table.setAttribute('aria-label', `${title} within ${parentLabel}`);
       const thead = document.createElement('thead');
       const header = document.createElement('tr');
-      ['Group', selectedMetric === 'cost' ? `Estimated ${selectedCurrency}` : 'Credits', 'Tool calls'].forEach((text, index) => {
+      ['Group', selectedMetric === 'cost' ? 'Estimated cost' : 'Credits', 'Tool calls'].forEach((text, index) => {
         const th = document.createElement('th');
         th.scope = 'col';
         th.textContent = text;
@@ -1043,9 +1043,9 @@
       const rows = groups[panel.dataset.breakdownGroup] || [];
       const tbody = panel.querySelector('tbody');
       const withPrices = panel.dataset.hasPrices === 'true';
-      panel.querySelector('[data-primary-metric-head]').textContent = selectedMetric === 'cost' ? `Estimated ${selectedCurrency}` : 'Credits';
+      panel.querySelector('[data-primary-metric-head]').textContent = selectedMetric === 'cost' ? 'Estimated cost' : 'Credits';
       const secondaryHead = panel.querySelector('[data-secondary-metric-head]');
-      if (secondaryHead) secondaryHead.textContent = selectedMetric === 'cost' ? 'Exact credits' : `Estimated ${selectedCurrency}`;
+      if (secondaryHead) secondaryHead.textContent = selectedMetric === 'cost' ? 'Exact credits' : 'Estimated cost';
       tbody.replaceChildren();
       if (!rows.length) {
         const row = document.createElement('tr');
@@ -1145,7 +1145,7 @@
     donut.setAttribute('aria-label', segments.length
       ? `Included model ${selectedMetric === 'cost' ? 'estimated cost' : 'credit'} shares: ${segments.map((segment) => `${segment.model.id} ${segment.share.toFixed(0)} percent`).join(', ')}`
       : 'No models are included in the usage view');
-    modelCard.querySelector('[data-model-value-head]').textContent = selectedMetric === 'cost' ? `Estimated ${selectedCurrency}` : 'Credits';
+    modelCard.querySelector('[data-model-value-head]').textContent = selectedMetric === 'cost' ? 'Estimated cost' : 'Credits';
     modelCard.querySelectorAll('.model-row').forEach((row) => {
       const model = models.find((item) => item.id === row.dataset.model);
       const segment = segments.find((item) => item.model.id === model.id);
@@ -1219,7 +1219,7 @@
     reserveDashboardHeight();
     currentPeriodRecords = recordsForPeriod(periodDays);
     const view = combined(currentPeriodRecords);
-    document.querySelector('[data-total-label]').textContent = selectedMetric === 'cost' ? `Estimated Scout cost (${selectedCurrency})` : 'Total Scout-only credits';
+    document.querySelector('[data-total-label]').textContent = selectedMetric === 'cost' ? 'Estimated Scout cost' : 'Total Scout-only credits';
     document.querySelector('[data-total-credits]').textContent = formatMetric(view.total);
     document.querySelector('[data-total-calls]').textContent = compact(view.total.calls);
     document.querySelector('[data-total-tokens]').textContent = `${compact(view.total.input)} / ${compact(view.total.output)}`;
@@ -1229,7 +1229,7 @@
     const allModelsIncluded = selected.size === models.length;
     summary.classList.remove('is-concealed');
     summary.setAttribute('aria-hidden', 'false');
-    summary.textContent = `Last ${periodDays} days · ${selectedMetric === 'cost' ? `Estimated ${selectedCurrency}` : 'Exact credits'}${allModelsIncluded ? '' : ` · ${selected.size} of ${models.length} models`}`;
+    summary.textContent = `Last ${periodDays} days · ${selectedMetric === 'cost' ? 'Estimated cost' : 'Exact credits'}${allModelsIncluded ? '' : ` · ${selected.size} of ${models.length} models`}`;
     updateMoney(view);
     updateTrend(periodDays, view.total);
     updateSpark(view.groups.day, periodDays);

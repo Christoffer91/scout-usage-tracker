@@ -139,7 +139,7 @@ Start a new Scout conversation if needed, then use:
 /cost today                   # current chat today
 /cost last answer             # last completed answer
 /cost all chats today         # all locally retained Scout chats today
-/cost all chats this week     # all local chats this ISO week
+/cost all chats this week     # all local chats this week
 /cost all chats this month    # all local chats this month
 /cost FAQ                     # complete usage guide
 /cost open                    # open the local dashboard with the native launcher
