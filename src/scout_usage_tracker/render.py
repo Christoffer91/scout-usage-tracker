@@ -156,7 +156,7 @@ def _table_panel(
 def _breakdown(data: dict[str, Any], model_prices: dict[str, Decimal | None]) -> str:
     definitions = [
         ("day", "By day", "By day", data["groups"]["day"], None),
-        ("week", "By ISO week", "By ISO week", data["groups"]["week"], None),
+        ("week", "By week", "By week", data["groups"]["week"], None),
         ("month", "By month", "By month", data["groups"]["month"], None),
         ("model", "By model", "By model", data["groups"]["model"], model_prices),
     ]

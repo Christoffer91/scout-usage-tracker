@@ -132,7 +132,7 @@ class CostReportTests(unittest.TestCase):
             add_event(source, "current", "s", 2, 1, "2026-08-07T08:01:00Z")
             report = build_cost_report(source, "s", "UTC", now=datetime(2026, 8, 7, 12, tzinfo=timezone.utc))
             for period, title in (("last", "Last completed answer"), ("day", "Current chat today"),
-                                  ("week", "Current chat this ISO week"), ("month", "Current chat this month")):
+                                  ("week", "Current chat this week"), ("month", "Current chat this month")):
                 self.assertTrue(format_cost_report(report, period).startswith(title), period)
             self.assertTrue(format_cost_report(report, "all", scope="all").startswith("All locally retained"))
             self.assertTrue(format_cost_report(report, "day", scope="all").startswith("All Scout chats today"))
