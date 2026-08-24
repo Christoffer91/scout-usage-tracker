@@ -80,7 +80,7 @@ class BillingTests(unittest.TestCase):
             path.write_text(json.dumps({**base, "schema_version": 1, "billing": {"plan": "pro+", "snapshot_path": "billing.json"}}), encoding="utf-8")
             config = load_config(path)
             self.assertEqual(config["billing"]["plan"], "pro_plus")
-            self.assertEqual(config["schema_version"], 4)
+            self.assertEqual(config["schema_version"], 5)
             self.assertEqual(Path(config["billing"]["snapshot_path"]).resolve(), (Path(temporary) / "billing.json").resolve())
             path.write_text(json.dumps({**base, "billing": {"plan": "pro", "seat_count": True}}), encoding="utf-8")
             with self.assertRaises(ConfigError):

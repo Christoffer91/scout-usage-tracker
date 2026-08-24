@@ -60,6 +60,7 @@ class LifecyclePrivacyTests(unittest.TestCase):
             config = home / ".config/scout-usage-tracker/config.json"
             configured = json.loads(config.read_text(encoding="utf-8"))
             self.assertEqual(configured["secondary_currency"], {"code": "EUR", "usd_rate": "0.92"})
+            self.assertEqual(configured["currency_rates"], {"EUR": "0.92"})
             before = config.read_bytes()
             subprocess.run([
                 "sh", str(ROOT / "install.sh"), "update", "--usd-only",

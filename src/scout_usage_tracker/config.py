@@ -13,7 +13,7 @@ from typing import Any
 
 from .platform_support import TimezoneDataError, secure_chmod, timezone_for
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 LEGACY_KEYS = {
     "sourceDatabase": "source_database",
     "historyDatabase": "history_database",
@@ -77,7 +77,17 @@ def _migrate(raw: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     if "secondary_currency" not in data:
         data["secondary_currency"] = None
         changed = True
-    if version not in (0, 1, 2, 3, SCHEMA_VERSION):
+    if "currency_rates" not in data:
+        data["currency_rates"] = {}
+        changed = True
+    secondary = data.get("secondary_currency")
+    rates = data.get("currency_rates")
+    if isinstance(secondary, dict) and isinstance(rates, dict):
+        code = str(secondary.get("code", "")).upper()
+        if code and code not in rates:
+            rates[code] = secondary.get("usd_rate")
+            changed = True
+    if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
         raise ConfigError(f"unsupported config schema_version: {version}")
     if "language" not in data:
         data["language"] = "en"
@@ -150,6 +160,22 @@ def validate_config(data: dict[str, Any], config_path: Path) -> dict[str, Any]:
         if not exchange.is_finite() or exchange <= 0:
             raise ConfigError("secondary_currency.usd_rate must be a positive finite number")
         result["secondary_currency"] = {"code": code, "usd_rate": str(exchange)}
+    currency_rates = result.get("currency_rates", {})
+    if not isinstance(currency_rates, dict):
+        raise ConfigError("currency_rates must be an object")
+    clean_currency_rates: dict[str, str] = {}
+    for raw_code, raw_rate in currency_rates.items():
+        code = str(raw_code).upper()
+        if not re.fullmatch(r"[A-Z]{3}", code) or code == "USD":
+            raise ConfigError("currency_rates keys must be three-letter codes other than USD")
+        try:
+            exchange = Decimal(str(raw_rate))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ConfigError(f"currency_rates.{code} must be a positive finite number") from exc
+        if not exchange.is_finite() or exchange <= 0:
+            raise ConfigError(f"currency_rates.{code} must be a positive finite number")
+        clean_currency_rates[code] = str(exchange)
+    result["currency_rates"] = dict(sorted(clean_currency_rates.items()))
     comparison = result.get("account_comparison")
     if comparison is not None and not isinstance(comparison, dict):
         raise ConfigError("account_comparison must be an object")
@@ -261,7 +287,7 @@ def load_config(path: str | Path, write_migration: bool = True) -> dict[str, Any
 
 
 def configure_secondary_currency(path: str | Path, code: str | None, usd_rate: str | None) -> dict[str, Any]:
-    """Set an optional display currency without changing usage or pricing data."""
+    """Add a local display currency, or reset estimates to USD only."""
     config_path = Path(path).expanduser().resolve()
     try:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
@@ -270,10 +296,15 @@ def configure_secondary_currency(path: str | Path, code: str | None, usd_rate: s
     if not isinstance(raw, dict):
         raise ConfigError("config root must be an object")
     migrated, _ = _migrate(raw)
-    migrated["secondary_currency"] = None if code is None else {
-        "code": code.upper(),
-        "usd_rate": usd_rate,
-    }
+    if code is None:
+        migrated["secondary_currency"] = None
+        migrated["currency_rates"] = {}
+    else:
+        normalized = code.upper()
+        currency_rates = dict(migrated.get("currency_rates") or {})
+        currency_rates[normalized] = usd_rate
+        migrated["currency_rates"] = currency_rates
+        migrated["secondary_currency"] = {"code": normalized, "usd_rate": usd_rate}
     validated = validate_config(migrated, config_path)
     atomic_write(config_path, json.dumps(migrated, indent=2, sort_keys=True) + "\n")
     return validated

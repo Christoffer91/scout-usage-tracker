@@ -165,7 +165,7 @@ credits = Decimal(total_nano_aiu) / 1,000,000,000
 
 **GitHub Copilot totals are account-wide.** They can combine Scout with other Copilot clients, devices, and apps. The tracker never treats an Admin or billing total as Scout-only usage.
 
-**Currency values are estimates, not bills.** USD is shown by default. A secondary currency is optional and uses the user's manually supplied conversion rate; the tracker never fetches exchange rates. GitHub defines one AI credit as USD 0.01. Included plan credits can make the billed amount lower or zero. Scout's token pricing is already reflected in exact nano-AIU; see GitHub's current [model pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) and [Copilot plans](https://docs.github.com/en/copilot/get-started/plans-for-github-copilot).
+**Currency values are estimates, not bills.** The dashboard starts with exact credits and lets the user switch the entire analytical view to Estimated cost. USD is always available; additional currencies use manually supplied rates and the tracker never fetches exchange rates. Costs never show decimals: USD and low-multiplier currencies round to whole units, while currencies where `1 USD >= 5` units round to the nearest 5. Included plan credits can make the billed amount lower or zero. Scout's token pricing is already reflected in exact nano-AIU; see GitHub's current [model pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) and [Copilot plans](https://docs.github.com/en/copilot/get-started/plans-for-github-copilot).
 
 ## Privacy
 
@@ -194,7 +194,8 @@ Common settings:
 | `language` | `/cost` language; default `en`, Norwegian `nb` |
 | `privacy.include_sessions` | Enables anonymized chat drill-downs; default `false` |
 | `usd_per_credit` | Gross USD estimate; default `0.01` |
-| `secondary_currency` | Optional code and manual rate (`1 USD = X`); `null` means USD only |
+| `currency_rates` | Optional manual conversions keyed by three-letter ISO code (`1 USD = X`) |
+| `secondary_currency` | Currency used by `/cost`; also migrates into `currency_rates` |
 | `billing.*` | Optional plan context and private aggregate snapshot |
 | `account_comparison` | Optional manual account-wide comparison |
 
@@ -212,15 +213,19 @@ The installers ask about currency only for a new interactive installation. Press
 .\install.ps1 install -Currency EUR -UsdRate 0.92
 ```
 
-Existing installations keep their current selection. The old `usd_to_nok` setting migrates automatically to a NOK secondary currency.
+Existing installations keep their current selection. The old `usd_to_nok` and single `secondary_currency` settings migrate automatically into the local currency map.
 
 Change it later with the installed launcher:
 
 ```sh
 ${HOME}/.local/bin/scout-usage configure-currency --usd-only
 ${HOME}/.local/bin/scout-usage configure-currency --code GBP --usd-rate 0.79
+${HOME}/.local/bin/scout-usage configure-currency --code NOK --usd-rate 10.25
+${HOME}/.local/bin/scout-usage configure-currency --code SEK --usd-rate 10.60
 ${HOME}/.local/bin/scout-usage render
 ```
+
+Repeat `configure-currency` to add rates. The dashboard selector lists USD plus every configured code; common examples include NOK, SEK, EUR, GBP, DKK, CHF, CAD, AUD, and JPY. Rates are local configuration, not live market data. `--usd-only` removes all configured conversions.
 
 On Windows, use `%USERPROFILE%\.local\bin\scout-usage.cmd` with the same arguments.
 

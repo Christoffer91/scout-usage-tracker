@@ -57,6 +57,7 @@
       outline: 3px solid var(--d-accent);
       outline-offset: 3px;
     }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .dashboard {
       width: 90%;
       margin: 0 auto;
@@ -107,6 +108,39 @@
       cursor: pointer;
     }
     .theme-toggle:hover { border-color: var(--d-muted); }
+    .metric-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--d-border);
+      border-radius: 7px;
+      background: var(--d-card);
+    }
+    .metric-button {
+      min-height: 27px;
+      padding: 4px 9px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--d-muted-text);
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .metric-button:hover { color: var(--d-strong); background: var(--d-bg); }
+    .metric-button[aria-pressed="true"] { color: #fff; background: var(--d-accent); }
+    .currency-select {
+      min-height: 32px;
+      padding: 4px 25px 4px 9px;
+      border: 1px solid var(--d-border);
+      border-radius: 7px;
+      background: var(--d-card);
+      color: var(--d-strong);
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+    }
     .card, .quiet-card {
       min-width: 0;
       border: 1px solid var(--d-border);
@@ -165,8 +199,7 @@
     .hero-kpi > span { display: block; color: var(--d-muted-text); font-size: 12.5px; }
     .hero-kpi strong { display: block; margin-top: 1px; color: var(--d-strong); font-size: 21px; line-height: 1.25; font-weight: 700; }
     .hero-kpi small { display: block; min-height: 3em; max-width: 155px; color: var(--d-muted-text); font-size: 11.5px; line-height: 1.5; }
-    .chart-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 24px; }
-    .chart-row.is-short-period { grid-template-columns: minmax(0, 11fr) minmax(420px, 9fr); }
+    .chart-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(420px, 2fr); gap: 24px; }
     .daily-card, .model-card { padding: 24px 28px; }
     .card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
     .chart-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
@@ -387,7 +420,7 @@
     .warning-list ul { margin: 0; padding-left: 18px; }
     footer { color: var(--d-muted-text); font-size: 12px; line-height: 1.6; }
     @media (max-width: 1280px) {
-      .chart-row, .chart-row.is-short-period { grid-template-columns: 1fr; }
+      .chart-row { grid-template-columns: 1fr; }
       .hero-kpis { width: 100%; margin-left: 0; }
       .hero-kpi { flex: 1; }
     }
@@ -426,13 +459,18 @@
     <div class="header-actions">
       <span class="chip status-chip {{VERIFICATION_CLASS}}"><i class="status-dot" aria-hidden="true"></i>{{VERIFICATION_CHIP}}</span>
       <span class="chip">Private local report</span>
+      <div class="metric-toggle" role="group" aria-label="Usage value">
+        <button type="button" class="metric-button" data-metric="credits" aria-pressed="true">Credits</button>
+        <button type="button" class="metric-button" data-metric="cost" aria-pressed="false">Estimated cost</button>
+      </div>
+      <label><span class="sr-only">Estimated cost currency</span><select class="currency-select" data-currency aria-label="Estimated cost currency"><option value="USD">USD</option></select></label>
       <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Dark theme</button>
     </div>
   </header>
 
   <section class="card hero-card" aria-label="Usage summary">
     <div class="hero-total">
-      <div class="eyebrow">Total Scout-only credits</div>
+      <div class="eyebrow" data-total-label>Total Scout-only credits</div>
       <div class="total-number" data-total-credits>{{TOTAL_CREDITS}}</div>
       <div class="delta {{DELTA_CLASS}}" data-delta>{{DELTA_TEXT}}</div>
       <span class="filter-summary is-concealed" data-filter-summary aria-hidden="true">Filtered view</span>
@@ -520,7 +558,7 @@
       dot.setAttribute('cx', point[0]);
       dot.setAttribute('cy', point[1]);
       dot.hidden = false;
-      tooltip.textContent = `${sparkSeries.labels[index]} · ${sparkSeries.values[index]} credits`;
+      tooltip.textContent = `${sparkSeries.labels[index]} · ${sparkSeries.values[index]}`;
       tooltip.style.left = `${point[0] / 220 * 100}%`;
       tooltip.hidden = false;
     };
@@ -567,6 +605,44 @@
   if (!models.length) return;
 
   const selected = new Set(models.map((model) => model.id));
+  const whole = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+  const availableCurrencies = Array.isArray(filterData.money?.currencies)
+    ? filterData.money.currencies.filter((item) => /^[A-Z]{3}$/.test(item.code) && Number(item.usd_rate) > 0)
+    : [{ code: 'USD', usd_rate: '1' }];
+  const currencyRates = new Map(availableCurrencies.map((item) => [item.code, Number(item.usd_rate)]));
+  if (!currencyRates.has('USD')) currencyRates.set('USD', 1);
+  const currencySelect = document.querySelector('[data-currency]');
+  currencySelect.replaceChildren(...Array.from(currencyRates.keys()).sort((a, b) => a === 'USD' ? -1 : b === 'USD' ? 1 : a.localeCompare(b)).map((code) => {
+    const option = document.createElement('option');
+    option.value = code;
+    option.textContent = code;
+    return option;
+  }));
+  let storedMetric = null, storedCurrency = null;
+  try {
+    storedMetric = localStorage.getItem('scout-value-metric');
+    storedCurrency = localStorage.getItem('scout-cost-currency');
+  } catch (_) {}
+  let selectedMetric = storedMetric === 'cost' ? 'cost' : 'credits';
+  let selectedCurrency = currencyRates.has(storedCurrency) ? storedCurrency : 'USD';
+  currencySelect.value = selectedCurrency;
+  const metricButtons = Array.from(document.querySelectorAll('[data-metric]'));
+  const syncMetricControls = () => metricButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.metric === selectedMetric));
+  });
+  metricButtons.forEach((button) => button.addEventListener('click', () => {
+    selectedMetric = button.dataset.metric;
+    syncMetricControls();
+    try { localStorage.setItem('scout-value-metric', selectedMetric); } catch (_) {}
+    updateAll();
+  }));
+  currencySelect.addEventListener('change', () => {
+    selectedCurrency = currencyRates.has(currencySelect.value) ? currencySelect.value : 'USD';
+    currencySelect.value = selectedCurrency;
+    try { localStorage.setItem('scout-cost-currency', selectedCurrency); } catch (_) {}
+    updateAll();
+  });
+  syncMetricControls();
   const allowedPeriods = [7, 14, 30, 60, 90, 365];
   let storedPeriod = null;
   try { storedPeriod = Number(localStorage.getItem('scout-period-days')); } catch (_) {}
@@ -595,14 +671,42 @@
     });
   });
   syncPeriodButtons();
-  const whole = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
-  const costNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
-  const blank = () => ({ nano: 0, calls: 0, input: 0, output: 0, cache_read: 0 });
+  const usdRateByModel = new Map(models.map((model) => {
+    const modelCredits = Number(model.total?.nano || 0) / 1e9;
+    return [model.id, model.estimated_usd == null || !modelCredits ? null : Number(model.estimated_usd) / modelCredits];
+  }));
+  const blank = () => ({ nano: 0, calls: 0, input: 0, output: 0, cache_read: 0, estimated_usd: 0, price_complete: true });
   const add = (target, source) => {
     target.nano += Number(source.nano || 0);
     for (const key of ['calls', 'input', 'output', 'cache_read']) target[key] += Number(source[key] || 0);
+    if (source.model) {
+      const rate = usdRateByModel.get(source.model);
+      if (rate == null) target.price_complete = false;
+      else target.estimated_usd += Number(source.nano || 0) / 1e9 * rate;
+    } else if (source.price_complete === false) target.price_complete = false;
+    else if (source.estimated_usd != null) target.estimated_usd += Number(source.estimated_usd);
   };
   const credits = (item) => Number(item.nano || 0) / 1e9;
+  const usdCost = (item) => item?.price_complete === false ? null : Number(item?.estimated_usd || 0);
+  const currencyRate = () => currencyRates.get(selectedCurrency) || 1;
+  const roundCurrencyValue = (value) => {
+    const increment = currencyRate() >= 5 ? 5 : 1;
+    return Math.round(value / increment) * increment;
+  };
+  const roundedCost = (usd) => {
+    return roundCurrencyValue(usd * currencyRate());
+  };
+  const formatCost = (item) => {
+    const usd = usdCost(item);
+    return usd == null ? '—' : `${selectedCurrency} ${whole.format(roundedCost(usd))}`;
+  };
+  const metricValue = (item) => selectedMetric === 'cost'
+    ? (usdCost(item) == null ? 0 : usdCost(item) * currencyRate())
+    : credits(item);
+  const formatMetric = (item) => selectedMetric === 'cost' ? formatCost(item) : whole.format(credits(item));
+  const formatScaleValue = (value) => selectedMetric === 'cost'
+    ? `${selectedCurrency} ${whole.format(roundCurrencyValue(value))}`
+    : compact(Math.round(value));
   const compact = (value) => {
     for (const [divisor, suffix] of [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) {
       if (Math.abs(value) >= divisor) return `${(value / divisor).toFixed(1).replace(/\.0$/, '')}${suffix}`;
@@ -653,11 +757,12 @@
     const ticks = scale.compressed
       ? [[scale.maximum, 100, 'top'], [scale.cap, 72, ''], [0, 0, '']]
       : [[scale.maximum, 100, 'top'], [scale.maximum / 2, 50, ''], [0, 0, '']];
-    ticks.forEach(([value, position, className]) => {
+    const tickLabels = ticks.map(([value]) => formatScaleValue(value));
+    ticks.forEach(([value, position, className], index) => {
       const tick = document.createElement('span');
       tick.className = `chart-y-tick ${className}`.trim();
       tick.style.bottom = `${position}%`;
-      tick.textContent = compact(Math.round(value));
+      tick.textContent = selectedMetric === 'cost' && tickLabels.slice(index + 1).includes(tickLabels[index]) ? '' : tickLabels[index];
       axis.append(tick);
     });
     if (scale.compressed) {
@@ -673,10 +778,10 @@
         key.className = 'scale-key';
         card.querySelector('.chart-meta').prepend(key);
       }
-      key.textContent = `Compressed above ${compact(Math.round(scale.cap))}`;
+      key.textContent = `Compressed above ${formatScaleValue(scale.cap)}`;
     } else if (key) key.remove();
     bars.setAttribute('aria-label', scale.compressed
-      ? `${chartLabel} with a compressed scale above ${whole.format(Math.round(scale.cap))} credits`
+      ? `${chartLabel} with a compressed scale above ${formatScaleValue(scale.cap)}`
       : `${chartLabel} with a linear scale`);
   };
   const friendlyDay = (label) => {
@@ -733,14 +838,6 @@
     const groups = {};
     Object.entries(maps).forEach(([name, values]) => {
       groups[name] = Array.from(values.values()).sort((a, b) => a.label.localeCompare(b.label));
-      if (name === 'model') {
-        groups[name].forEach((item) => {
-          const model = models.find((candidate) => candidate.id === item.label);
-          const modelCredits = model ? credits(model.total) : 0;
-          const rate = modelCredits ? Number(model.estimated_usd || 0) / modelCredits : null;
-          item.estimated_usd = model?.estimated_usd == null || rate == null ? null : credits(item) * rate;
-        });
-      }
     });
     return { total, groups };
   };
@@ -774,7 +871,7 @@
   const updateSpark = (dayRows, days) => {
     if (!spark) return;
     const rows = windowRows(dayRows, days);
-    const values = rows.map(credits);
+    const values = rows.map(metricValue);
     const low = Math.min(...values), high = Math.max(...values);
     const scale = dailyScale(values);
     const points = values.map((value, index) => {
@@ -786,22 +883,23 @@
           : 48 - (value - low) / (high - low) * 44;
       return [Number(x.toFixed(2)), Number(y.toFixed(2))];
     });
-    sparkSeries = { labels: rows.map((row) => friendlyDay(row.label)), values: values.map((value) => whole.format(value)), points };
+    sparkSeries = { labels: rows.map((row) => friendlyDay(row.label)), values: rows.map(formatMetric), points };
     spark.querySelector('polyline').setAttribute('points', points.map((point) => point.join(',')).join(' '));
+    const trendLabel = selectedMetric === 'cost' ? `estimated ${selectedCurrency} cost` : 'credit';
     spark.querySelector('svg').setAttribute('aria-label', scale.compressed
-      ? `${days}-day credit trend with a compressed scale above ${whole.format(Math.round(scale.cap))} credits`
-      : `${days}-day credit trend`);
+      ? `${days}-day ${trendLabel} trend with a compressed scale above ${formatScaleValue(scale.cap)}`
+      : `${days}-day ${trendLabel} trend`);
     const caption = spark.querySelector('.chart-caption');
     if (caption) caption.textContent = scale.compressed
-      ? `${days}-day trend · compressed above ${compact(Math.round(scale.cap))}`
-      : `${days}-day trend`;
+      ? `${days}-day trend · compressed above ${formatScaleValue(scale.cap)}`
+      : `${days}-day trend${selectedMetric === 'cost' ? ` · Estimated ${selectedCurrency}` : ''}`;
     spark.querySelector('.spark-dot').hidden = true;
     spark.querySelector('.spark-tooltip').hidden = true;
   };
   const updateTrend = (days, currentTotal) => {
     const element = document.querySelector('[data-delta]');
-    const current = credits(currentTotal);
-    const previous = credits(totalFor(recordsForPeriod(days, true)));
+    const current = metricValue(currentTotal);
+    const previous = metricValue(totalFor(recordsForPeriod(days, true)));
     let text = `— vs previous ${days} days`, state = 'delta-neutral';
     if (previous) {
       const change = (current - previous) / Math.abs(previous) * 100;
@@ -814,11 +912,13 @@
   };
   const updateDaily = (dayRows, days) => {
     const card = document.querySelector('.daily-card');
-    document.querySelector('.chart-row').classList.toggle('is-short-period', days <= 14);
     const chart = card.querySelector('[data-bar-chart]');
     const weekly = days === 365;
     const rows = weekly ? weeklyRows(windowRows(dayRows, days)) : windowRows(dayRows, days);
-    const values = rows.map((row) => Math.max(0, credits(row)));
+    const values = rows.map((row) => Math.max(0, metricValue(row)));
+    const chartLabel = selectedMetric === 'cost'
+      ? `Estimated ${weekly ? 'weekly' : 'daily'} cost (${selectedCurrency})`
+      : `${weekly ? 'Weekly' : 'Daily'} credits`;
     const detectSpikes = values.filter((value) => value > 0).length >= 15;
     const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
     const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / Math.max(1, values.length));
@@ -833,7 +933,7 @@
       button.type = 'button';
       button.className = 'bar-hit';
       const periodLabel = weekly ? `ISO week ${row.label}` : friendlyDay(row.label);
-      button.dataset.tip = `${periodLabel} · ${whole.format(credits(row))} credits${spike ? ` · unusually high ${weekly ? 'week' : 'day'}` : ''}`;
+      button.dataset.tip = `${periodLabel} · ${selectedMetric === 'cost' ? 'Estimated ' : ''}${formatMetric(row)}${selectedMetric === 'credits' ? ' credits' : ''}${spike ? ` · unusually high ${weekly ? 'week' : 'day'}` : ''}`;
       button.setAttribute('aria-label', button.dataset.tip);
       const fill = document.createElement('span');
       fill.className = `bar-fill${value === 0 ? ' empty' : ''}${spike ? ' spike' : ''}${index === rows.length - 1 ? ' latest' : ''}`;
@@ -849,7 +949,6 @@
       key.append(marker, weekly ? 'Unusually high week' : 'Unusually high day');
       meta.append(key);
     }
-    const chartLabel = weekly ? 'Weekly credits' : 'Daily credits';
     card.querySelector('[data-chart-title]').textContent = chartLabel;
     applyDailyScale(card, rows, values, chartLabel);
     const axis = card.querySelector('.axis');
@@ -877,7 +976,7 @@
     });
     const rows = Array.from(grouped.values());
     if (['day', 'week', 'month'].includes(key)) return rows.sort((a, b) => b.label.localeCompare(a.label));
-    return rows.sort((a, b) => credits(b) - credits(a) || a.label.localeCompare(b.label));
+    return rows.sort((a, b) => metricValue(b) - metricValue(a) || a.label.localeCompare(b.label));
   };
   const drilldownDefinitions = (group) => ({
     day: [['Models', 'model'], ['Chats', 'chat']],
@@ -907,7 +1006,7 @@
       table.setAttribute('aria-label', `${title} within ${parentLabel}`);
       const thead = document.createElement('thead');
       const header = document.createElement('tr');
-      ['Group', 'Credits', 'Tool calls'].forEach((text, index) => {
+      ['Group', selectedMetric === 'cost' ? `Estimated ${selectedCurrency}` : 'Credits', 'Tool calls'].forEach((text, index) => {
         const th = document.createElement('th');
         th.scope = 'col';
         th.textContent = text;
@@ -922,7 +1021,7 @@
         name.scope = 'row';
         name.textContent = detailKey === 'chat' ? `Chat-${index + 1}` : detail.label;
         detailRow.append(name);
-        cell(detailRow, whole.format(credits(detail)), 'numeric');
+        cell(detailRow, formatMetric(detail), 'numeric');
         cell(detailRow, whole.format(detail.calls), 'numeric');
         tbody.append(detailRow);
       });
@@ -944,6 +1043,9 @@
       const rows = groups[panel.dataset.breakdownGroup] || [];
       const tbody = panel.querySelector('tbody');
       const withPrices = panel.dataset.hasPrices === 'true';
+      panel.querySelector('[data-primary-metric-head]').textContent = selectedMetric === 'cost' ? `Estimated ${selectedCurrency}` : 'Credits';
+      const secondaryHead = panel.querySelector('[data-secondary-metric-head]');
+      if (secondaryHead) secondaryHead.textContent = selectedMetric === 'cost' ? 'Exact credits' : `Estimated ${selectedCurrency}`;
       tbody.replaceChildren();
       if (!rows.length) {
         const row = document.createElement('tr');
@@ -952,7 +1054,7 @@
         tbody.append(row);
         return;
       }
-      const maximum = Math.max(...rows.map((item) => Math.abs(credits(item))), 0);
+      const maximum = Math.max(...rows.map((item) => Math.abs(metricValue(item))), 0);
       [...rows].reverse().forEach((item) => {
         const row = document.createElement('tr');
         row.className = 'expandable-row';
@@ -978,12 +1080,12 @@
         row.append(heading);
         const creditCell = cell(row, '', 'credits-cell numeric');
         const strong = document.createElement('strong');
-        strong.textContent = whole.format(credits(item));
+        strong.textContent = formatMetric(item);
         const bar = document.createElement('span');
         bar.className = 'credit-bar';
         bar.setAttribute('aria-hidden', 'true');
         const fill = document.createElement('span');
-        fill.style.width = `${maximum ? Math.abs(credits(item)) / maximum * 100 : 0}%`;
+        fill.style.width = `${maximum ? Math.abs(metricValue(item)) / maximum * 100 : 0}%`;
         bar.append(fill);
         creditCell.append(strong, bar);
         cell(row, whole.format(item.calls), 'numeric');
@@ -992,7 +1094,7 @@
         cell(row, whole.format(item.cache_read), 'numeric');
         const denominator = item.input + item.cache_read;
         cell(row, denominator ? `${(item.cache_read / denominator * 100).toFixed(1)}%` : '—', 'numeric');
-        if (withPrices) cell(row, item.estimated_usd == null ? '—' : `USD ${costNumber.format(Number(item.estimated_usd))}`, 'numeric');
+        if (withPrices) cell(row, selectedMetric === 'cost' ? whole.format(credits(item)) : formatCost(item), 'numeric');
         tbody.append(row);
         if (expandedRows.has(rowKey)) tbody.append(makeDrilldownRow(panel.dataset.breakdownGroup, item.label, withPrices ? 8 : 7));
         row.addEventListener('click', () => {
@@ -1013,7 +1115,7 @@
   const showAll = modelCard.querySelector('[data-show-all]');
   let segments = [];
   let currentModelUsage = new Map();
-  const resetDonut = () => { donutCenter.textContent = 'credits'; donutTooltip.hidden = true; };
+  const resetDonut = () => { donutCenter.textContent = selectedMetric === 'cost' ? `Est. ${selectedCurrency}` : 'credits'; donutTooltip.hidden = true; };
   const resetDonutLift = () => {
     donut.classList.remove('is-hovered');
     donut.style.removeProperty('--tilt-x');
@@ -1022,7 +1124,7 @@
   const showDetail = (model, share, x = 55, y = -34) => {
     const usage = currentModelUsage.get(model.id) || blank();
     donutCenter.textContent = `${model.id} ${share.toFixed(0)}%`;
-    donutTooltip.textContent = `${model.id} · ${share.toFixed(0)}% · ${whole.format(credits(usage))} credits`;
+    donutTooltip.textContent = `${model.id} · ${share.toFixed(0)}% · ${selectedMetric === 'cost' ? 'Estimated ' : ''}${formatMetric(usage)}${selectedMetric === 'credits' ? ' credits' : ''}`;
     donutTooltip.style.left = `${x}px`;
     donutTooltip.style.top = `${y}px`;
     donutTooltip.hidden = false;
@@ -1030,10 +1132,10 @@
   const updateModels = (modelRows) => {
     currentModelUsage = new Map(modelRows.map((row) => [row.label, row]));
     const included = models.filter((model) => selected.has(model.id));
-    const total = included.reduce((sum, model) => sum + credits(currentModelUsage.get(model.id) || blank()), 0);
+    const total = included.reduce((sum, model) => sum + metricValue(currentModelUsage.get(model.id) || blank()), 0);
     let cursor = 0;
     segments = included.map((model) => {
-      const share = total ? credits(currentModelUsage.get(model.id) || blank()) / total * 100 : 0;
+      const share = total ? metricValue(currentModelUsage.get(model.id) || blank()) / total * 100 : 0;
       const segment = { model, share, start: cursor, end: cursor + share };
       cursor += share;
       return segment;
@@ -1041,8 +1143,9 @@
     const stops = segments.map((segment) => `${segment.model.color} ${segment.start.toFixed(2)}% ${segment.end.toFixed(2)}%`);
     donut.style.setProperty('--donut', stops.length && total ? `conic-gradient(${stops.join(',')})` : 'var(--d-border)');
     donut.setAttribute('aria-label', segments.length
-      ? `Included model shares: ${segments.map((segment) => `${segment.model.id} ${segment.share.toFixed(0)} percent`).join(', ')}`
+      ? `Included model ${selectedMetric === 'cost' ? 'estimated cost' : 'credit'} shares: ${segments.map((segment) => `${segment.model.id} ${segment.share.toFixed(0)} percent`).join(', ')}`
       : 'No models are included in the usage view');
+    modelCard.querySelector('[data-model-value-head]').textContent = selectedMetric === 'cost' ? `Estimated ${selectedCurrency}` : 'Credits';
     modelCard.querySelectorAll('.model-row').forEach((row) => {
       const model = models.find((item) => item.id === row.dataset.model);
       const segment = segments.find((item) => item.model.id === model.id);
@@ -1050,7 +1153,7 @@
       row.setAttribute('aria-pressed', String(active));
       row.setAttribute('aria-label', `${active ? 'Exclude' : 'Include'} ${model.id} ${active ? 'from' : 'in'} dashboard totals`);
       row.querySelector('.model-share').textContent = segment ? `${segment.share.toFixed(0)}%` : '—';
-      row.querySelector('.model-credits').textContent = whole.format(credits(currentModelUsage.get(model.id) || blank()));
+      row.querySelector('.model-credits').textContent = formatMetric(currentModelUsage.get(model.id) || blank());
     });
     filterStatus.textContent = `${selected.size} of ${models.length} models included`;
     const allModelsIncluded = selected.size === models.length;
@@ -1102,21 +1205,22 @@
   const updateMoney = (view) => {
     const container = document.querySelector('[data-money-kpi]');
     if (!container) return;
-    const mode = filterData.money?.mode;
-    let usd = null;
-    if (mode === 'model') usd = view.groups.model.reduce((sum, model) => sum + Number(model.estimated_usd || 0), 0);
-    if (mode === 'credit') usd = credits(view.total) * Number(filterData.money.usd_per_credit || 0);
-    if (usd == null) return;
-    container.querySelector('[data-money-total]').textContent = `USD ${whole.format(usd)}`;
-    const secondary = filterData.money.secondary_currency;
-    const converted = secondary == null ? '' : `${secondary.code} ${whole.format(usd * Number(secondary.usd_rate))} · `;
-    container.querySelector('[data-money-note]').textContent = `${converted}${mode === 'credit' ? 'AI-credit estimate, not a bill' : 'estimate, not a bill'}`;
+    if (selectedMetric === 'cost') {
+      container.querySelector('[data-money-label]').textContent = 'Exact Scout credits';
+      container.querySelector('[data-money-total]').textContent = whole.format(credits(view.total));
+      container.querySelector('[data-money-note]').textContent = 'exact nano-AIU ledger';
+    } else {
+      container.querySelector('[data-money-label]').textContent = 'Estimated cost';
+      container.querySelector('[data-money-total]').textContent = formatCost(view.total);
+      container.querySelector('[data-money-note]').textContent = 'estimate, not a bill';
+    }
   };
   function updateAll() {
     reserveDashboardHeight();
     currentPeriodRecords = recordsForPeriod(periodDays);
     const view = combined(currentPeriodRecords);
-    document.querySelector('[data-total-credits]').textContent = whole.format(credits(view.total));
+    document.querySelector('[data-total-label]').textContent = selectedMetric === 'cost' ? `Estimated Scout cost (${selectedCurrency})` : 'Total Scout-only credits';
+    document.querySelector('[data-total-credits]').textContent = formatMetric(view.total);
     document.querySelector('[data-total-calls]').textContent = compact(view.total.calls);
     document.querySelector('[data-total-tokens]').textContent = `${compact(view.total.input)} / ${compact(view.total.output)}`;
     const denominator = view.total.input + view.total.cache_read;
@@ -1125,7 +1229,7 @@
     const allModelsIncluded = selected.size === models.length;
     summary.classList.remove('is-concealed');
     summary.setAttribute('aria-hidden', 'false');
-    summary.textContent = `Last ${periodDays} days${allModelsIncluded ? '' : ` · ${selected.size} of ${models.length} models`}`;
+    summary.textContent = `Last ${periodDays} days · ${selectedMetric === 'cost' ? `Estimated ${selectedCurrency}` : 'Exact credits'}${allModelsIncluded ? '' : ` · ${selected.size} of ${models.length} models`}`;
     updateMoney(view);
     updateTrend(periodDays, view.total);
     updateSpark(view.groups.day, periodDays);
