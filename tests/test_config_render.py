@@ -241,7 +241,7 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertNotIn(">Expand</button>", text)
         self.assertIn("makeDrilldownRow", text)
         self.assertIn("drilldownDefinitions", text)
-        self.assertIn("@media (max-width: 1200px)", text)
+        self.assertIn("@media (max-width: 1280px)", text)
         self.assertIn(".model-legend { width: 100%; }", text)
         self.assertIn(".quiet-row { grid-template-columns: minmax(0, 1fr); }", text)
         self.assertNotIn("title=", text)
@@ -263,6 +263,9 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("ISO week ${row.label}", text)
         self.assertIn("weekly ? 'Weekly credits' : 'Daily credits'", text)
         self.assertIn("weekly ? friendlyWeek(rows[0].label) : friendlyDay(rows[0].label)", text)
+        self.assertIn(".chart-row.is-short-period { grid-template-columns: minmax(0, 11fr) minmax(420px, 9fr); }", text)
+        self.assertIn(".chart-row, .chart-row.is-short-period { grid-template-columns: 1fr; }", text)
+        self.assertIn("classList.toggle('is-short-period', days <= 14)", text)
 
     def test_model_filter_payload_contains_only_aggregate_usage(self):
         source = self.root / "filter-source.sqlite3"
