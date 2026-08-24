@@ -17,7 +17,7 @@ from .billing import billing_summary
 from .config import atomic_write
 from .database import connect_history, secure_history_files
 from .history import active_events, latest_run
-from .pricing import estimate_costs
+from .pricing import estimate_costs, round_currency
 from .platform_support import secure_chmod
 
 MODEL_COLORS = ("#008a00", "#7bc87a", "#ba8e6b", "#ec7a2e", "#8a9499", "#33a133")
@@ -54,12 +54,12 @@ def _compact(value: int) -> str:
     return str(value)
 
 
-def _money(value: Decimal | None, currency: str) -> str:
-    return "—" if value is None else f"{currency} {_decimal(value, 4)}"
+def _money(value: Decimal | None, currency: str, usd_rate: Any = "1") -> str:
+    return "—" if value is None else f"{currency} {round_currency(value, usd_rate):,.0f}"
 
 
-def _money_total(value: Decimal | None, currency: str) -> str:
-    return "—" if value is None else f"{currency} {value:,.0f}"
+def _money_total(value: Decimal | None, currency: str, usd_rate: Any = "1") -> str:
+    return "—" if value is None else f"{currency} {round_currency(value, usd_rate):,.0f}"
 
 
 def _friendly_day(value: str) -> str:
@@ -136,7 +136,7 @@ def _table_panel(
             f'<td class="numeric">{_escape(share)}</td>{price}</tr>'
         )
     column_count = 8 if prices is not None else 7
-    price_head = '<th scope="col" class="numeric">Estimated cost</th>' if prices is not None else ""
+    price_head = '<th scope="col" class="numeric" data-secondary-metric-head>Estimated cost</th>' if prices is not None else ""
     hidden = "" if active else " hidden"
     return (
         f'<div class="tab-panel" id="panel-{tab_id}" role="tabpanel" '
@@ -144,7 +144,7 @@ def _table_panel(
         f'data-has-prices="{str(prices is not None).lower()}"{hidden}>'
         '<div class="table-wrap"><table>'
         f'<caption>{_escape(title)} usage breakdown</caption><thead><tr>'
-        '<th scope="col">Period or group</th><th scope="col" class="numeric">Credits</th>'
+        '<th scope="col">Period or group</th><th scope="col" class="numeric" data-primary-metric-head>Credits</th>'
         '<th scope="col" class="numeric">Tool calls</th><th scope="col" class="numeric">Input</th>'
         '<th scope="col" class="numeric">Output</th><th scope="col" class="numeric">Cache read</th>'
         f'<th scope="col" class="numeric">Cache share</th>{price_head}</tr></thead><tbody>'
@@ -294,7 +294,7 @@ def _model_share(models: list[dict[str, Any]]) -> str:
         '<div class="donut-center" aria-live="polite">credits</div></div>'
         '<div class="chart-tooltip donut-tooltip" role="status" aria-live="polite" hidden></div></div>'
         '<div class="model-legend"><div class="model-legend-head" aria-hidden="true">'
-        '<span></span><span>Model</span><span>Share (%)</span><span>Credits</span></div>'
+        '<span></span><span>Model</span><span>Share (%)</span><span data-model-value-head>Credits</span></div>'
         + ("".join(legend) or '<p class="empty">No model usage.</p>')
         + '<p class="model-filter-status" data-model-filter-status aria-live="polite"></p></div></div></section>'
     )
@@ -342,9 +342,10 @@ def _filter_payload(
             "groups": groups,
             "estimated_usd": None if model_prices.get(label) is None else str(model_prices[label]),
         })
+    currency_rates = dict(config.get("currency_rates") or {})
     secondary = config.get("secondary_currency")
-    if secondary is None and config.get("usd_to_nok") is not None:
-        secondary = {"code": "NOK", "usd_rate": config["usd_to_nok"]}
+    if secondary is not None:
+        currency_rates.setdefault(secondary["code"], secondary["usd_rate"])
     money_mode = "none"
     if models and all(model["estimated_usd"] is not None for model in models):
         money_mode = "model"
@@ -364,10 +365,10 @@ def _filter_payload(
         "money": {
             "mode": money_mode,
             "usd_per_credit": "0.01" if money_mode == "credit" else None,
-            "secondary_currency": None if secondary is None else {
-                "code": secondary["code"],
-                "usd_rate": str(secondary["usd_rate"]),
-            },
+            "currencies": [
+                {"code": "USD", "usd_rate": "1"},
+                *({"code": code, "usd_rate": str(rate)} for code, rate in sorted(currency_rates.items())),
+            ],
         },
     }
     return _escape(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
@@ -396,7 +397,7 @@ def _billing_card(
         price += " per user/seat per month" if summary["pooled"] else " / month"
     gross_row = f"<dt>Estimated gross Scout value</dt><dd>{_escape(_money_total(summary['estimated_gross_scout_usd'], 'USD'))}"
     if summary["estimated_gross_scout_secondary"] is not None:
-        gross_row += f" · {_escape(_money_total(summary['estimated_gross_scout_secondary'], summary['secondary_currency_code']))}"
+        gross_row += f" · {_escape(_money_total(summary['estimated_gross_scout_secondary'], summary['secondary_currency_code'], summary['secondary_currency_rate']))}"
     gross_row += " · estimate, not an invoice</dd>"
     if not summary["enabled"]:
         rows = []
@@ -444,7 +445,7 @@ def _billing_card(
         if summary["estimated_additional_credits"] is not None:
             extra = f"{_credits(summary['estimated_additional_credits'])} credits · {_money(summary['estimated_additional_usd'], 'USD')}"
             if summary["estimated_additional_secondary"] is not None:
-                extra += f" · {_money(summary['estimated_additional_secondary'], summary['secondary_currency_code'])}"
+                extra += f" · {_money(summary['estimated_additional_secondary'], summary['secondary_currency_code'], summary['secondary_currency_rate'])}"
             rows.append(f"<dt>Estimated additional usage</dt><dd>{_escape(extra)} · estimate, not an invoice</dd>")
         elif summary["pooled"]:
             note = "Business and Enterprise allowances are billing-entity pools; this tracker never allocates a pool share to one user."
@@ -541,18 +542,18 @@ def render_dashboard(config: dict[str, Any], template_path: str | Path | None = 
     if estimates["total_usd"] is not None:
         estimate_note = "estimate, not a bill"
         if estimates["total_secondary"] is not None:
-            estimate_note = f'{_escape(_money_total(estimates["total_secondary"], estimates["secondary_currency_code"]))} · {estimate_note}'
+            estimate_note = f'{_escape(_money_total(estimates["total_secondary"], estimates["secondary_currency_code"], estimates["secondary_currency_rate"]))} · {estimate_note}'
         money_kpi = (
-            '<div class="hero-kpi" data-money-kpi><span>Estimated cost</span>'
+            '<div class="hero-kpi" data-money-kpi><span data-money-label>Estimated cost</span>'
             f'<strong data-money-total>{_escape(_money_total(estimates["total_usd"], "USD"))}</strong>'
             f'<small data-money-note>{estimate_note}</small></div>'
         )
     elif billing["estimated_gross_scout_usd"] is not None:
         estimate_note = "AI-credit estimate, not a bill"
         if billing["estimated_gross_scout_secondary"] is not None:
-            estimate_note = f'{_escape(_money_total(billing["estimated_gross_scout_secondary"], billing["secondary_currency_code"]))} · {estimate_note}'
+            estimate_note = f'{_escape(_money_total(billing["estimated_gross_scout_secondary"], billing["secondary_currency_code"], billing["secondary_currency_rate"]))} · {estimate_note}'
         money_kpi = (
-            '<div class="hero-kpi" data-money-kpi><span>Estimated gross Scout value</span>'
+            '<div class="hero-kpi" data-money-kpi><span data-money-label>Estimated gross Scout value</span>'
             f'<strong data-money-total>{_escape(_money_total(billing["estimated_gross_scout_usd"], "USD"))}</strong>'
             f'<small data-money-note>{estimate_note}</small></div>'
         )

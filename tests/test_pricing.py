@@ -1,13 +1,20 @@
 import unittest
 from decimal import Decimal
 
-from scout_usage_tracker.pricing import credits_from_nano, estimate_costs, recalculate_nano, verification
+from scout_usage_tracker.pricing import credits_from_nano, estimate_costs, recalculate_nano, round_currency, verification
 
 
 class PricingTests(unittest.TestCase):
     def test_exact_conversion_and_negative_adjustment(self):
         self.assertEqual(credits_from_nano(1), Decimal("0.000000001"))
         self.assertEqual(credits_from_nano(-500000000), Decimal("-0.5"))
+
+    def test_currency_rounding_never_uses_decimals_and_large_rates_round_to_five(self):
+        self.assertEqual(round_currency("334.49", "1"), Decimal("334"))
+        self.assertEqual(round_currency("334.50", "1"), Decimal("335"))
+        self.assertEqual(round_currency("3182", "9.5"), Decimal("3180"))
+        self.assertEqual(round_currency("3183", "9.5"), Decimal("3185"))
+        self.assertEqual(round_currency("307.6", "0.92"), Decimal("308"))
 
     def test_recalculation_precision_and_tolerance(self):
         state, value, _ = recalculate_nano('[{"tokenCount":"3","costPerBatch":"0.1","batchSize":"2"}]')

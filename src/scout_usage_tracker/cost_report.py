@@ -12,7 +12,7 @@ from typing import Any, Callable
 
 from .aggregate import local_zone
 from .platform_support import sqlite_readonly_uri
-from .pricing import credits_from_nano, estimate_costs, verification
+from .pricing import credits_from_nano, estimate_costs, round_currency, verification
 
 
 class CostReportError(RuntimeError):
@@ -281,8 +281,8 @@ def _tokens(value: int, language: str) -> str:
     return _integer(value, language)
 
 
-def _money(value: Decimal, language: str, places: str = "0.01") -> str:
-    rendered = f"{value.quantize(Decimal(places), rounding=ROUND_HALF_UP):,}"
+def _money(value: Decimal, language: str, usd_rate: Any = "1") -> str:
+    rendered = f"{round_currency(value, usd_rate):,.0f}"
     if language == "nb":
         return rendered.replace(",", "X").replace(".", ",").replace("X", " ")
     return rendered
@@ -389,7 +389,7 @@ def format_cost_report(
         for item, usd in priced:
             cost = ("ca. **" if language == "nb" else "approx. **") + f"USD {_money(usd, language)}"
             if exchange is not None:
-                cost += f" / {currency_code} {_money(usd * exchange, language, '1')}"
+                cost += f" / {currency_code} {_money(usd * exchange, language, exchange)}"
             label = f"{_model_name(item.model)}-delen" if language == "nb" else _model_name(item.model)
             lines.append(f"{label}: {cost}**")
     else:
@@ -398,9 +398,9 @@ def format_cost_report(
         credits = sum((item.credits for item in unpriced), Decimal(0))
         names = ", ".join(dict.fromkeys(_model_name(item.model) for item in unpriced))
         if language == "nb":
-            lines.append(f"Uten pris: **{_money(credits, language)} credits** fra {names}.")
+            lines.append(f"Uten pris: **{_whole(credits, language)} credits** fra {names}.")
         else:
-            lines.append(f"Unpriced: **{_money(credits, language)} credits** from {names}.")
+            lines.append(f"Unpriced: **{_whole(credits, language)} credits** from {names}.")
     safe_link = None if not dashboard_uri else f'<a href="{escape(dashboard_uri, quote=True)}">Usage tracker</a>'
     if language == "nb":
         lines.extend(["", "Dette er Scout-only og inkluderer ikke GitHub Copilot-appen eller andre Copilot-klienter."])

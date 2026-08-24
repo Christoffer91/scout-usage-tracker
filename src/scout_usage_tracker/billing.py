@@ -183,6 +183,7 @@ def billing_summary(config: dict[str, Any], scout_credits: Decimal, *, now: date
         "estimated_additional_credits": estimated_additional,
         "estimated_additional_usd": additional_usd,
         "secondary_currency_code": currency_code,
+        "secondary_currency_rate": exchange,
         "estimated_additional_secondary": additional_usd * exchange if additional_usd is not None and exchange is not None else None,
         "estimated_additional_nok": additional_usd * exchange if additional_usd is not None and currency_code == "NOK" else None,
         "estimated_gross_scout_usd": gross_scout_usd,

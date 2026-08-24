@@ -41,11 +41,12 @@ class ConfigRenderTests(unittest.TestCase):
         path.chmod(0o640)
         config = load_config(path)
         migrated = json.loads(path.read_text())
-        self.assertEqual(migrated["schema_version"], 4)
+        self.assertEqual(migrated["schema_version"], 5)
         self.assertEqual(config["language"], "en")
         self.assertEqual(config["usd_per_credit"], "0.01")
         self.assertTrue(config["privacy"]["include_sessions"])
         self.assertIsNone(config["secondary_currency"])
+        self.assertEqual(config["currency_rates"], {})
         if os.name != "nt":
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
@@ -84,9 +85,10 @@ class ConfigRenderTests(unittest.TestCase):
         path.write_text(json.dumps({**base, "schema_version": 3, "usd_to_nok": "10.25"}), encoding="utf-8")
         config = load_config(path)
         self.assertEqual(config["secondary_currency"], {"code": "NOK", "usd_rate": "10.25"})
+        self.assertEqual(config["currency_rates"], {"NOK": "10.25"})
         migrated = json.loads(path.read_text())
         self.assertNotIn("usd_to_nok", migrated)
-        self.assertEqual(migrated["schema_version"], 4)
+        self.assertEqual(migrated["schema_version"], 5)
         for value in (
             {"code": "EU", "usd_rate": "1"},
             {"code": "USD", "usd_rate": "1"},
@@ -94,6 +96,12 @@ class ConfigRenderTests(unittest.TestCase):
             {"code": "EUR", "usd_rate": "NaN"},
         ):
             path.write_text(json.dumps({**base, "secondary_currency": value}), encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(path)
+        path.write_text(json.dumps({**base, "currency_rates": {"NOK": "10", "SEK": "10.5", "EUR": "0.9"}}), encoding="utf-8")
+        self.assertEqual(load_config(path)["currency_rates"], {"EUR": "0.9", "NOK": "10", "SEK": "10.5"})
+        for rates in ({"US": "1"}, {"USD": "1"}, {"NOK": "0"}, {"EUR": "NaN"}):
+            path.write_text(json.dumps({**base, "currency_rates": rates}), encoding="utf-8")
             with self.assertRaises(ConfigError):
                 load_config(path)
 
@@ -198,8 +206,8 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("maximum >= robustCap * 4", text)
         self.assertIn("value / scale.cap * 72", text)
         self.assertIn("Math.log1p((value - scale.cap) / scale.cap)", text)
-        self.assertIn("${days}-day credit trend with a compressed scale above", text)
-        self.assertIn('"secondary_currency":{"code":"EUR","usd_rate":"0.9"}', unescape(text))
+        self.assertIn("${days}-day ${trendLabel} trend with a compressed scale above", text)
+        self.assertIn('"currencies":[{"code":"USD","usd_rate":"1"},{"code":"EUR","usd_rate":"0.9"}]', unescape(text))
         self.assertIn("${days}-day trend · compressed above", text)
         self.assertIn('data-model-card', text)
         self.assertIn('data-donut', text)
@@ -261,11 +269,19 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("const weekly = days === 365", text)
         self.assertIn("const weeklyRows = (rows) =>", text)
         self.assertIn("ISO week ${row.label}", text)
-        self.assertIn("weekly ? 'Weekly credits' : 'Daily credits'", text)
+        self.assertIn("`${weekly ? 'Weekly' : 'Daily'} credits`", text)
         self.assertIn("weekly ? friendlyWeek(rows[0].label) : friendlyDay(rows[0].label)", text)
-        self.assertIn(".chart-row.is-short-period { grid-template-columns: minmax(0, 11fr) minmax(420px, 9fr); }", text)
-        self.assertIn(".chart-row, .chart-row.is-short-period { grid-template-columns: 1fr; }", text)
-        self.assertIn("classList.toggle('is-short-period', days <= 14)", text)
+        self.assertIn(".chart-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(420px, 2fr);", text)
+        self.assertIn(".chart-row { grid-template-columns: 1fr; }", text)
+        self.assertNotIn("is-short-period", text)
+        self.assertIn('data-metric="credits" aria-pressed="true"', text)
+        self.assertIn('data-metric="cost" aria-pressed="false"', text)
+        self.assertIn("localStorage.getItem('scout-value-metric')", text)
+        self.assertIn("localStorage.getItem('scout-cost-currency')", text)
+        self.assertIn("const increment = currencyRate() >= 5 ? 5 : 1", text)
+        self.assertIn("selectedMetric === 'cost' ? formatCost(item)", text)
+        self.assertIn("data-primary-metric-head", text)
+        self.assertIn("data-model-value-head", text)
 
     def test_model_filter_payload_contains_only_aggregate_usage(self):
         source = self.root / "filter-source.sqlite3"
@@ -319,7 +335,7 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("Current billing month", text)
         self.assertIn("Estimated gross Scout value", text)
         self.assertIn("GitHub-reported usage amount; not a final invoice", text)
-        self.assertIn("200 credits · USD 2 · EUR 1.8", text)
+        self.assertIn("200 credits · USD 2 · EUR 2", text)
         self.assertNotIn("Enable billing and configure billing.plan", text)
 
     def test_pooled_card_does_not_estimate_user_overage(self):

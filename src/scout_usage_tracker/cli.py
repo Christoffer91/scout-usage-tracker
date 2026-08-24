@@ -163,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--dashboard-link", choices=("file", "loopback"), default="file",
         help="use a short-lived, localhost-only dashboard link for constrained chat clients",
     )
-    currency = commands.add_parser("configure-currency", help="configure an optional manual USD conversion")
+    currency = commands.add_parser("configure-currency", help="add a manual USD conversion, or reset to USD only")
     currency.add_argument("--config", default=argparse.SUPPRESS, help="JSON configuration path")
     currency.add_argument("--code", help="three-letter secondary currency code")
     currency.add_argument("--usd-rate", help="manual conversion rate: 1 USD equals this amount")

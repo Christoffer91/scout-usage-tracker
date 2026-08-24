@@ -20,8 +20,14 @@ class CliBillingTests(unittest.TestCase):
             }), encoding="utf-8")
             self.assertEqual(command_configure_currency(str(path), "eur", "0.92", False), 0)
             self.assertEqual(json.loads(path.read_text())["secondary_currency"], {"code": "EUR", "usd_rate": "0.92"})
+            self.assertEqual(command_configure_currency(str(path), "sek", "10.5", False), 0)
+            configured = json.loads(path.read_text())
+            self.assertEqual(configured["currency_rates"], {"EUR": "0.92", "SEK": "10.5"})
+            self.assertEqual(configured["secondary_currency"], {"code": "SEK", "usd_rate": "10.5"})
             self.assertEqual(command_configure_currency(str(path), None, None, True), 0)
-            self.assertIsNone(json.loads(path.read_text())["secondary_currency"])
+            configured = json.loads(path.read_text())
+            self.assertIsNone(configured["secondary_currency"])
+            self.assertEqual(configured["currency_rates"], {})
 
     def test_cost_delegates_missing_session_to_safe_autodetection(self):
         output = StringIO()

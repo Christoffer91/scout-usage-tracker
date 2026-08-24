@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 NANO_PER_CREDIT = Decimal("1000000000")
+
+
+def round_currency(value: Any, usd_rate: Any = "1") -> Decimal:
+    """Round estimates to whole units, or to 5 when 1 USD is worth at least 5."""
+    amount = _decimal(value, "currency amount")
+    rate = _decimal(usd_rate, "currency rate")
+    if rate <= 0:
+        raise ValueError("currency rate must be positive")
+    increment = Decimal("5") if rate >= 5 else Decimal("1")
+    return (amount / increment).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * increment
 
 
 def credits_from_nano(total_nano_aiu: int) -> Decimal:
