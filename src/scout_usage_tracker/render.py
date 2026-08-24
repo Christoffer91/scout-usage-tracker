@@ -251,7 +251,7 @@ def _daily_chart(daily: list[dict[str, Any]]) -> str:
         for days in (7, 14, 30, 60, 90, 365)
     )
     return (
-        '<section class="card daily-card"><div class="card-heading"><h2>Daily credits</h2>'
+        '<section class="card daily-card"><div class="card-heading"><h2 data-chart-title>Daily credits</h2>'
         '<div class="chart-heading-actions">'
         f'<div class="chart-meta">{spike_legend}</div>'
         '<div class="period-toggle" role="group" aria-label="Dashboard time period">'
