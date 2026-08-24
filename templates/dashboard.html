@@ -166,6 +166,7 @@
     .hero-kpi strong { display: block; margin-top: 1px; color: var(--d-strong); font-size: 21px; line-height: 1.25; font-weight: 700; }
     .hero-kpi small { display: block; min-height: 3em; max-width: 155px; color: var(--d-muted-text); font-size: 11.5px; line-height: 1.5; }
     .chart-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 24px; }
+    .chart-row.is-short-period { grid-template-columns: minmax(0, 11fr) minmax(420px, 9fr); }
     .daily-card, .model-card { padding: 24px 28px; }
     .card-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
     .chart-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
@@ -385,8 +386,8 @@
     .warning-list { margin-top: 16px; color: var(--d-muted-text); font-size: 12.5px; }
     .warning-list ul { margin: 0; padding-left: 18px; }
     footer { color: var(--d-muted-text); font-size: 12px; line-height: 1.6; }
-    @media (max-width: 1200px) {
-      .chart-row { grid-template-columns: 1fr; }
+    @media (max-width: 1280px) {
+      .chart-row, .chart-row.is-short-period { grid-template-columns: 1fr; }
       .hero-kpis { width: 100%; margin-left: 0; }
       .hero-kpi { flex: 1; }
     }
@@ -813,6 +814,7 @@
   };
   const updateDaily = (dayRows, days) => {
     const card = document.querySelector('.daily-card');
+    document.querySelector('.chart-row').classList.toggle('is-short-period', days <= 14);
     const chart = card.querySelector('[data-bar-chart]');
     const weekly = days === 365;
     const rows = weekly ? weeklyRows(windowRows(dayRows, days)) : windowRows(dayRows, days);
