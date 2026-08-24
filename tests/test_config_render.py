@@ -194,7 +194,7 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("Compressed above", text)
         self.assertIn("className = 'chart-y-axis'", text)
         self.assertIn("className = 'chart-y-break'", text)
-        self.assertIn("Daily credits with a compressed scale above", text)
+        self.assertIn("${chartLabel} with a compressed scale above", text)
         self.assertIn("maximum >= robustCap * 4", text)
         self.assertIn("value / scale.cap * 72", text)
         self.assertIn("Math.log1p((value - scale.cap) / scale.cap)", text)
@@ -257,6 +257,12 @@ class ConfigRenderTests(unittest.TestCase):
         self.assertIn("localStorage.setItem('scout-period-days', String(periodDays))", text)
         self.assertIn("const recordsForPeriod = (days, previous = false) =>", text)
         self.assertIn("updateModels(modelUsageFor(currentPeriodRecords))", text)
+        self.assertIn('data-chart-title>Daily credits</h2>', text)
+        self.assertIn("const weekly = days === 365", text)
+        self.assertIn("const weeklyRows = (rows) =>", text)
+        self.assertIn("ISO week ${row.label}", text)
+        self.assertIn("weekly ? 'Weekly credits' : 'Daily credits'", text)
+        self.assertIn("weekly ? friendlyWeek(rows[0].label) : friendlyDay(rows[0].label)", text)
 
     def test_model_filter_payload_contains_only_aggregate_usage(self):
         source = self.root / "filter-source.sqlite3"
