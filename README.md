@@ -1,10 +1,10 @@
 # Scout Usage Tracker
 
-See how many AI credits Microsoft Scout uses—locally, privately, and separately from your account-wide GitHub Copilot usage.
+Track Microsoft Scout's AI credit use locally, separately from account-wide GitHub Copilot usage.
 
-The tracker reads Scout's local ledger in read-only mode, retains a private SQLite history, and generates one standalone HTML dashboard. It sends no telemetry, starts no persistent or externally listening server, and needs no cloud account. On Windows, an explicitly requested `/cost` report can start the bounded `127.0.0.1` viewer described below.
+Scout Usage Tracker opens Scout's local ledger read-only, keeps a private SQLite history, and generates a standalone HTML dashboard. It sends no telemetry, needs no cloud account, and starts no persistent or externally listening server. The optional `/cost` skill reports usage inside Scout.
 
-**Desktop only:** Scout and this tracker run locally on Windows or macOS. There is no mobile installation or mobile dashboard workflow.
+**Desktop only:** Scout and this tracker run on the same Windows or macOS computer.
 
 ![Synthetic Scout Usage Tracker dashboard](docs/images/synthetic-dashboard-desktop.png)
 
@@ -14,7 +14,7 @@ The tracker reads Scout's local ledger in read-only mode, retains a private SQLi
 
 The same prompt works in **Microsoft Scout**, **Codex**, **Claude Code**, and the **GitHub Copilot app**. The agent must have local terminal and file access on the Windows or macOS computer where Scout is installed. A web-only or remote agent cannot install against Scout's local database and must never ask you to upload it.
 
-<details open>
+<details>
 <summary><strong>Copy this installation prompt</strong></summary>
 
 ```text
@@ -61,14 +61,14 @@ conversation and use /cost.
 
 </details>
 
-## What you get
+## What it shows
 
 - Exact Scout-only credits from `total_nano_aiu`.
-- Daily, ISO-weekly, monthly, and per-model totals with interactive model filtering.
-- Independent AIU verification from `token_details_json`.
-- Incremental, duplicate-safe private history in SQLite.
-- A self-contained light/dark desktop dashboard that adapts to different window widths.
-- Optional `/cost`, anonymized chat drill-downs, estimates, and account-wide comparisons.
+- A Credits / Estimated cost switch across the dashboard.
+- USD plus manually configured currencies. The tracker never fetches exchange rates.
+- Daily, weekly, monthly, and per-model views with period and model filters.
+- Incremental private history and independent AIU verification.
+- Optional `/cost` reports and anonymized chat drill-downs.
 
 ## Install manually
 
@@ -145,13 +145,9 @@ Start a new Scout conversation if needed, then use:
 /cost open                    # open the local dashboard with the native launcher
 ```
 
-Bare `/cost` and bare `/cost FAQ` always return English output; an explicit language request may select Norwegian. The skill returns tracker stdout verbatim. `/cost` reports usage before the command itself and keeps the current chat as the default scope. It shows rounded credits for readability, model-level gross estimates, a short clickable **Usage tracker** link, and preserves the full final invitation to use `/cost FAQ`.
+Bare `/cost` and `/cost FAQ` return English. Ask explicitly for Norwegian when needed. `/cost` excludes the command itself and uses the current chat unless you request all chats. It reports rounded credits, model-level gross estimates, and a short **Usage tracker** link.
 
-Scout on Windows blocks private `file://` links outside its active workspace. On Windows, the installed skill therefore asks the tracker
-for an on-demand `http://127.0.0.1` link. It is protected by a random capability token, serves only the
-self-contained dashboard, writes no access log, and stops after the first successful dashboard fetch or five
-minutes. It never listens on an external interface and is not a scheduled task, service, or persistent background
-job. `/cost open` remains a native-launcher fallback if the short-lived link expires or cannot be started. macOS/POSIX keeps its existing direct local dashboard link and does not start the loopback viewer for normal `/cost` reports.
+Scout on Windows blocks private `file://` links outside its workspace. The skill can instead request a one-time link from a bounded `127.0.0.1` viewer. A random token protects the link. The viewer serves only the dashboard, keeps no access log, and stops after one successful fetch or five minutes. It never listens outside the computer. `/cost open` is the fallback. macOS/POSIX uses a direct local file link.
 
 The command never prints prompts, responses, raw session IDs, database paths, or token details. Calendar and automation surfaces sometimes omit `SESSION_ID`; the tracker fails closed unless exactly one uniquely fresh local session can be identified.
 
@@ -165,7 +161,7 @@ credits = Decimal(total_nano_aiu) / 1,000,000,000
 
 **GitHub Copilot totals are account-wide.** They can combine Scout with other Copilot clients, devices, and apps. The tracker never treats an Admin or billing total as Scout-only usage.
 
-**Currency values are estimates, not bills.** The dashboard starts with exact credits and lets the user switch the entire analytical view to Estimated cost. USD is always available; additional currencies use manually supplied rates and the tracker never fetches exchange rates. Costs never show decimals: USD and low-multiplier currencies round to whole units, while currencies where `1 USD >= 5` units round to the nearest 5. Included plan credits can make the billed amount lower or zero. Scout's token pricing is already reflected in exact nano-AIU; see GitHub's current [model pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) and [Copilot plans](https://docs.github.com/en/copilot/get-started/plans-for-github-copilot).
+**Currency values are estimates, not bills.** The dashboard starts with exact credits. Switch to Estimated cost to use USD or a manually configured currency. The tracker does not fetch exchange rates. It shows no cost decimals: low-multiplier currencies round to whole units, while currencies worth at least five units per USD round to the nearest five. Included credits may reduce the billed amount to zero. See GitHub's current [model pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) and [Copilot plans](https://docs.github.com/en/copilot/get-started/plans-for-github-copilot).
 
 ## Privacy
 
@@ -178,7 +174,7 @@ It never stores or sends:
 - Scout source paths or source row IDs;
 - telemetry or external analytics.
 
-On POSIX, runtime directories use mode `0700` and private files use `0600`. Windows does not pretend POSIX `chmod` supplies ACL protection; its installer instead canonicalizes managed paths, refuses reparse points, and requires them to remain strictly below the current user profile. Dashboard values are HTML-escaped and protected by a strict Content Security Policy.
+On POSIX, runtime directories use mode `0700` and private files use `0600`. On Windows, the installer canonicalizes managed paths, refuses reparse points, and keeps them under the current user profile. Dashboard values are HTML-escaped and protected by a strict Content Security Policy.
 
 Chat reporting is off by default. If enabled, drill-downs use local contextual labels such as `Chat-1`; they are not Scout titles or stable identities. Scout exposes no supported read-only API for its visible chat names, so the tracker does not decrypt or infer them.
 
@@ -231,7 +227,7 @@ On Windows, use `%USERPROFILE%\.local\bin\scout-usage.cmd` with the same argumen
 
 ## Optional GitHub billing snapshot
 
-Normal tracker commands make no external network requests. The `/cost` skill's explicitly documented loopback viewer is local-only; `github-sync` is the only explicit billing read and uses an existing authenticated `gh` CLI session:
+Normal tracker commands make no external network requests. The `/cost` loopback viewer is local-only. `github-sync` is the only billing read and uses an existing authenticated `gh` CLI session:
 
 ```sh
 ${HOME}/.local/bin/scout-usage github-sync --scope user --owner YOUR_LOGIN
@@ -239,7 +235,7 @@ ${HOME}/.local/bin/scout-usage github-sync --scope organization --owner YOUR_ORG
 ${HOME}/.local/bin/scout-usage render
 ```
 
-User scope excludes organization-managed usage. Organization and enterprise scopes require billing-administration permission. The tracker stores only an aggregate snapshot—never tokens, owners, raw responses, repositories, or model rows. See GitHub's [billing usage API](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10).
+User scope excludes organization-managed usage. Organization and enterprise scopes require billing-administration permission. The tracker stores only the aggregate snapshot. It does not store owners, raw responses, repositories, model rows, or token details. See GitHub's [billing usage API](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10).
 
 ## Optional automatic refresh on macOS
 
@@ -317,7 +313,7 @@ Only enumerated tracker-owned paths are removed; unsafe or unowned locations are
 
 ## Windows verification status
 
-Windows support was tested on an ARM64 Windows OS with native ARM64 Windows PowerShell 5.1. An official, checksum-verified portable CPython 3.13.13 ARM64 build (64-bit) with SQLite 3.50.4 ran the original 104-test Windows-support suite successfully, with 11 skips: eight because POSIX `sh` was unavailable and three because the embeddable package lacked IANA timezone data. CPython 3.11.9 AMD64 with SQLite 3.45.1 ran that suite successfully under x64 emulation, with eight POSIX `sh` skips. The later loopback hyperlink and `/cost FAQ` footer change ran the expanded 108-test suite under AMD64 Python on the ARM64 host, with eight POSIX `sh` skips; that incremental change was not rerun with native ARM64 Python. The default Windows local timezone and DST behavior are verified; when timezone data is unavailable, an explicitly configured IANA timezone fails with actionable guidance. Physical x64 Windows hardware, PowerShell 7, the macOS lifecycle, and the actual Scout in-app hyperlink click remain unverified. The loopback viewer itself was exercised through the installed runtime with synthetic HTML. The safe Windows `os.startfile` construction and error handling are unit-tested. Automatic refresh remains macOS-only.
+Windows ARM64 was tested with native CPython 3.13 and with AMD64 CPython 3.11 under x64 emulation. The Windows lifecycle and loopback viewer pass their automated tests. Expected skips cover POSIX-only shell tests and IANA timezone data missing from some embeddable Python builds. Physical x64 Windows hardware, PowerShell 7, and the actual Scout in-app hyperlink click remain unverified. Automatic refresh remains macOS-only.
 
 ## Verify the calculation
 
